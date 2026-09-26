@@ -1,0 +1,352 @@
+================================================================================
+ESTALINGRADO CORP · INTRA-NET
+IA27 TERMINAL — Historial de Sesión
+================================================================================
+Fecha: 2026-09-25
+Modelo: Atenea-Omega-IB2.gguf (Qwen2.5-7B-Instruct Q4_K_M, 4.36 GB)
+Motor: llama.cpp local (sin Python)
+Chat template: chatml
+Cache KV: f16/f16
+Internet: on (bajo autorización de sesión)
+
+================================================================================
+SESIÓN 1 — Diagnóstico de respuestas corruptas
+================================================================================
+
+[PROBLEMA REPORTADO]
+El modelo responde de forma incorrecta:
+"Soy soy, un At IA-27es IA-277, o nteente AIintSP de inteligenca artificial
+localesadaPI. A la asPPIA. Mi PPO es pIPPI es AtnetaPIa Omegha Beta Bheta BA
+(IA-ene). Mi PM estan unIPnteIPI IA27) y lo Iencia de inteligencia artificial
+localmenteMi. laPIPIisia AIA eP7."
+
+[DIAGNÓSTICO REALIZADO]
+1. Verificación del binario llama-cli directo: responde perfecto
+   "¡Hola! ¿Cómo estás? ¿En qué puedo ayudarte hoy?"
+
+2. Verificación de llama-server con /v1/chat/completions: limpio
+3. Verificación de llama-server con /completion + ChatML: limpio
+4. Verificación de llama-server con --chat-template chatml: limpio
+5. Verificación de llama-server con --cache-type q4_0: CORRUPTO
+   → "Hola!ola!!" / "Hola!ola!la!.!"
+6. Verificación con --cache-type f16 (default): limpio
+   → "Hola! ¿Cómo estás? ¿En qué puedo ayudarte hoy?"
+
+[CAUSA RAÍZ CONFIRMADA]
+--cache-type-k/v q4_0 en llama-server causa corrupción de tokens en
+determinados modelos GGUF (incluido Qwen2.5-Coder-7B-Instruct Q4_K_M).
+El error se manifiesta como:
+  - Repetición de letras: "Hola!ola!" / "P P P P P P"
+  - Mezcla de tokens: "AtPI", "PI", "PPIA"
+  - Palabras partidas: "espa���o", "estoyoy"
+
+[SOLUCIÓN APLICADA]
+- Cambiar cache_type por defecto de q4_0 a f16 en AppConfig
+- Agregar propiedades CacheTypeK y CacheTypeV (default: "f16")
+- Forzar chat-template chatml (ignorar template Jinja embebido en GGUF)
+
+[VERIFICACIÓN POST-FIX]
+Comando: preguntar "hola"
+Resultado: "¡Hola! ¿Cómo estás? ¿En qué puedo ayudarte hoy?" ✓
+
+Comando: preguntar "quien eres"
+Resultado: "Soy Atenea Omega Beta (IA-27), un asistente de inteligencia
+artificial creado para facilitar tareas y proporcionar información." ✓
+
+================================================================================
+SESIÓN 2 — Estilo Cyberpunk y tema visual
+================================================================================
+
+[REQUISITOS]
+- Tema negro con azul predominante (azul oscuro)
+- Logo ASCII de Estalingrado Corp
+- Estética Cyberpunk 2077
+- Título: "Estalingrado Corp Intra-net"
+
+[IMPLEMENTACIÓN]
+- Consola: BackgroundColor=Black, ForegroundColor=Cyan
+- Título de ventana: "Estalingrado Corp · Intra-net"
+- Banner con estrella ASCII azul (12 puntas) centrada
+- Separadores: "//== IR3C5.CORE ==============================//"
+- Prompts: "tú>" en blanco, "IA27>" en azul oscuro
+- Colores: azul oscuro (#000080) para estructura, cian (#00FFFF) para texto,
+  gris para metadatos, blanco para ayuda
+- Restaura color y título original al salir
+
+[CÓDIGO DEL BANNER]
+//============================== IR3C5.CORE ==============================//
+         #####    ##    #####
+   ##   #####   ##   #####
+    #### ##### ####
+      ###########
+ ##   #########   ##
+    #############
+######################
+    #############
+ ##   #########   ##
+      ###########
+    #### ##### ####
+   ##   #####   ##
+        #####
+//============================== ESTALINGRADO CORP ======================//
+  INTRA-NET :: IA27 TERMINAL :: sistema local // canal seguro
+  ------------------------------------------------------------------------
+  modelo  : IA27-Atena-Omega-beta.gguf
+  origen  : C:\Users\nicot\OneDrive\Documentos\modelos IA\models
+  motor   : llama.cpp local // net: on // internet bajo autorización
+  ------------------------------------------------------------------------
+  /help ayuda · /clear limpiar · /use <modelo> cambiar · /exit salir
+
+================================================================================
+SESIÓN 3 — Streaming y cancelación Ctrl+C
+================================================================================
+
+[PROBLEMA]
+El usuario esperaba 5 minutos sin ver respuesta:
+"tú> hola
+ IA27>"
+
+[DIAGNÓSTICO]
+- Proceso llama-server PID 13732: 654 segundos de CPU, 7.3 GB RAM
+- El modelo SÍ estaba generando, pero la app no mostraba nada
+- Causa: la app esperaba la respuesta COMPLETA antes de imprimir
+- Con max_tokens=2048 a ~6 tok/s = ~5.5 minutos de espera
+
+[SOLUCIÓN IMPLEMENTADA]
+1. Streaming SSE: la app envía stream=true a llama-server
+   y recibe tokens individualmente via POST /v1/chat/completions
+2. Cada token se imprime inmediatamente en la consola
+3. Ctrl+C cancela la generación actual (vuelve al prompt)
+4. Indicador de "generando..." si la respuesta tarda > 10 segundos
+5. Detector de repetición degenerada: si detecta "P P P P..." o "777777..."
+   trunca la cola y reintenta con parámetros alternativos
+
+[VERIFICACIÓN]
+Comando: preguntar "hola" (con max_tokens=16)
+Resultado: respuesta en ~9 segundos, tokens visibles progresivamente ✓
+
+================================================================================
+SESIÓN 4 — Auto-intercepción de negativas del modelo
+================================================================================
+
+[PROBLEMA]
+El modelo responde:
+"Lo siento, como asistente IA, no tengo la capacidad de navegar por
+Internet ni acceder directamente a Wikipedia."
+
+[Causa]
+Qwen2.5-Coder-7B no es "agentic" nativamente. No usa el marcador [[NET]]
+sino que da respuestas de rechazo.
+
+[SOLUCIÓN]
+Patrón de intercepción de negativas (NetRefusalPattern):
+- Detecta frases como "no tengo capacidad de navegar", "no puedo acceder
+  a internet", "sin conexión", etc.
+- Cuando se detecta una negativa Y NetEnabled=true:
+  1. Muestra: "[INTERCEPCIÓN] El modelo negó tener acceso a internet.
+     Activando búsqueda con tu permiso..."
+  2. Usa la pregunta original del usuario como query de búsqueda
+  3. Pide permiso: "[SOLICITUD] ¿Permitir? (s/n)"
+  4. Si permite: busca en DuckDuckGo/Wikipedia
+  5. Inyecta resultados como mensaje de sistema
+  6. Reintenta la respuesta con datos reales
+
+================================================================================
+SESIÓN 5 — Descarga de modelos agente
+================================================================================
+
+[MODELOS DISPONIBLES PARA DESCARGA]
+1. qwen-instruct  → Qwen2.5-7B-Instruct-Q4_K_M.gguf (4.7 GB)
+   https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+
+2. hermes-3 → Hermes-3-Llama-3.1-8B-Q4_K_M.gguf (4.9 GB)
+   https://huggingface.co/bartowski/Hermes-3-Llama-3.1-8B-GGUF/resolve/main/Hermes-3-Llama-3.1-8B-Q4_K_M.gguf
+
+3. llama31 → Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf (4.9 GB)
+   https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
+
+4. mistral-v3 → Mistral-7B-Instruct-v0.3-Q4_K_M.gguf (4.4 GB)
+   https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf
+
+[COMANDOS DE GESTIÓN DE MODELOS]
+- /modelos  → muestra lista numerada, escribir número para cambiar
+- /cambiar  → acceso directo al selector de modelos
+- /use N    → cambia al modelo número N
+- /descargar → menú para descargar nuevos modelos
+- descargar  → comando externo para descarga directa
+
+================================================================================
+SESIÓN 6 — Modelo por defecto: Atenea-Omega-IB2
+================================================================================
+
+[ACCIÓN]
+- Qwen2.5-7B-Instruct descargado (4.7 GB, 7.2 min)
+- Renombrado a: Atenea-Omega-IB2.gguf
+- Ubicación: C:\Users\nicot\OneDrive\Documentos\modelos IA\models\Atenea-Omega-IB2.gguf
+- Configurado como modelo predeterminado (config.json: "model": "Atenea-Omega-IB2.gguf")
+
+[MODELOS INSTALADOS]
+1. Atenea-Omega-IB2.gguf (4.36 GB) ← PREDETERMINADO
+2. IA27-Atena-Omega-beta.gguf (4.36 GB)
+
+[VERIFICACIÓN]
+- "hola" → "¡Hola! ¿Cómo estás?" ✓
+- Usa [[NET]] proactivamente (a diferencia del Coder que solo negaba) ✓
+- Contexto nativo: 32,768 tokens
+
+================================================================================
+SESIÓN 7 — Permiso de internet persistente por sesión
+================================================================================
+
+[PROBLEMA]
+El modelo preguntaba por internet repetidamente en cada búsqueda.
+
+[IMPLEMENTACIÓN]
+- Campo netAuthorizedThisSession eliminado de TerminalApplication
+- Propiedad NetAutoAllowed agregada a LlamaServerSession
+- Al iniciar sesión de agente, se pregunta UNA VEZ:
+  "[INTRANET] ¿Permitir que el agente busque en internet automáticamente
+   en esta sesión? (s/n)"
+- Si dice "s": session.NetAutoAllowed = true
+  → el agente busca automáticamente cada vez que use [[NET]]
+  → no vuelve a preguntar durante toda la sesión
+- Si dice "n": pregunta cada vez que el modelo solicite búsqueda
+- Método AuthorizeNet actualizado: si NetAutoAllowed ya es true, no pregunta
+
+[VERIFICACIÓN]
+- "s" + "hola" → "¡Hola! ¿Cómo estás? [[NET]] estado del clima hoy en Madrid"
+  → [buscando en la web...] listo. (sin preguntar)
+- "s" + "qué hora es en madrid" → usa [[NET]] automáticamente
+  → responde con datos reales
+
+================================================================================
+ESTADO FINAL DEL SISTEMA
+================================================================================
+
+[CONFIGURACIÓN ACTUAL]
+  ModelDirectory: C:\Users\nicot\OneDrive\Documentos\modelos IA\models
+  SelectedModel: Atenea-Omega-IB2.gguf
+  RuntimeDirectory: (automático)
+  ContextSize: 4096
+  MaxTokens: 2048
+  Threads: 4
+  GpuLayers: 0
+  Temperature: 0.7
+  RepeatPenalty: 1.1
+  TopP: 0.9
+  ChatTemplate: chatml
+  CacheTypeK: f16
+  CacheTypeV: f16
+  NetEnabled: true
+  StartupTimeoutSeconds: 180
+
+[ARCHIVOS FUENTE]
+  IaTerminal.csproj — proyecto .NET 8
+  Program.cs — punto de entrada, tema de consola
+  AppConfig.cs — configuración persistente
+  ModelCatalog.cs — escaneo de archivos .gguf
+  GgufMetadataReader.cs — lector de metadatos GGUF
+  LlamaServerSession.cs — sesión de inferencia (streaming SSE)
+  TerminalApplication.cs — lógica de terminal y comandos
+  ModelRegistry.cs — catálogo de modelos descargables
+
+[UBICACIÓN DEL EJECUTABLE]
+  C:\Users\nicot\OneDrive\Desktop\IA 27 T\ia_terminal\publish\portable.exe
+  (self-contained .NET 8, single-file, ~67 MB, sin Python)
+
+================================================================================
+SESIÓN 8 — Búsqueda explícita del usuario + NetPolicy reforzada
+================================================================================
+
+[PROBLEMA REPORTADO]
+Al pedir "información de Estalingrado Corp", el modelo respondía con la
+información que tenía cargada en vez de buscar en internet. Al ordenarle
+"busca en internet", se negaba ("no tengo capacidad de navegar...") y la
+intercepción de negativas no siempre saltaba.
+
+[CAUSA RAÍZ]
+1. NetPolicy decía "úsalo solo cuando realmente aporte algo": el modelo 7B
+   decidía que sí conocía la entidad y respondía de memoria (alucinando).
+2. La búsqueda dependía 100% del modelo: si el USUARIO pedía buscar y el
+   modelo se negaba con una frase no cubierta por NetRefusalPattern, no
+   ocurría nada.
+
+[SOLUCIÓN APLICADA]
+1. NetPolicy reforzada (LlamaServerSession.cs):
+   - "TÚ SÍ PUEDES buscar en internet a través del sistema. NUNCA digas que
+     no puedes navegar."
+   - Regla obligatoria: ante entidades concretas (empresas, personas,
+     productos, eventos) o datos actuales sin certeza absoluta → responder
+     ÚNICAMENTE con [[NET]] + consulta. Ante la duda, buscar.
+
+2. Interceptación de intención explícita del usuario (TerminalApplication.cs):
+   - Nuevo patrón ExplicitSearchIntent: detecta "busca...", "búscame...",
+     "investiga...", "googlea...", "consulta...", "averigua...", "mira...",
+     o «<tema> en internet/la web/la red/google/wikipedia».
+   - Si el prompt del usuario coincide Y NetEnabled=true:
+     1. Se extrae la query limpia ("busca en internet Estalingrado Corp"
+        → "Estalingrado Corp")
+     2. Autorización (respeta NetAutoAllowed de sesión)
+     3. Se busca en DuckDuckGo/Wikipedia ANTES de preguntar al modelo
+     4. Se inyectan resultados como mensaje de sistema con la orden de
+        responder con esos datos y no inventar
+   - Ya no depende de que el modelo use [[NET]] cuando el usuario lo pide
+     directamente.
+
+3. NetRefusalPattern ampliado: "no puedo realizar búsquedas", "no puedo
+   buscar en la web", "no tengo capacidad de buscar/acceder",
+   "como modelo de IA ... internet", etc.
+
+[VERIFICACIÓN DEL REGEX]
+- "busca en internet Estalingrado Corp"    → query "Estalingrado Corp" ✓
+- "busca Estalingrado Corp en internet"    → query "Estalingrado Corp" ✓
+- "búscame info sobre Estalingrado Corp"   → query "Estalingrado Corp" ✓
+- "mira el clima de madrid en internet"    → query "el clima de madrid" ✓
+- "hola" / "cuentame un chiste"            → sin coincidencia ✓
+- "informacion de Estalingrado corp"       → sin coincidencia (el modelo
+  decide vía [[NET]] con la NetPolicy reforzada) ✓
+
+[COMPILACIÓN]
+dotnet build -c Release: OK (0 errores)
+dotnet publish -c Release -o publish: OK
+
+================================================================================
+SESIÓN 8b — Fuga del marcador [[NET]] y paroteo de la NetPolicy
+================================================================================
+
+[PROBLEMA REPORTADO]
+tú> que es estalingrado corp?
+IA27> ÚNICAMENTE el marcador exacto [[NET]] seguido de una consulta breve
+      de búsqueda (máximo 12 palabras): [[NET]] "¿Qué es Estalingrado Corp?"
+
+El modelo repite el texto de la NetPolicy antes del marcador, y como el
+streaming imprime token a token, esa basura llega a pantalla antes de que
+el sistema detecte el [[NET]].
+
+[CAUSA RAÍZ]
+1. La NetPolicy contenía una frase literal y "copiable" ("escribe
+   ÚNICAMENTE el marcador exacto [[NET]] seguido de...") que el modelo
+   paroleaba.
+2. El streaming imprimía todo tal cual; la detección del marcador ocurre
+   al FINAL de la respuesta, cuando el texto ya se había mostrado.
+
+[SOLUCIÓN APLICADA]
+1. NetPolicy reescrita sin frases copiables: la salida debe EMPEZAR
+   directamente con [[NET]] + consulta, con ejemplo explícito de salida
+   válida.
+2. Buffer anti-fugas en el streaming (AskWithNetPermissionAsync):
+   - Retiene la cola del texto: nunca imprime desde el último '[' en
+     adelante (ahí puede estar naciendo un "[[NET]]").
+   - Si la respuesta final contiene [[NET]] o es una negativa → la cola
+     retenida se DESCARTA (solo se muestra "[buscando en la web...]" y la
+     respuesta final con datos).
+   - Si es una respuesta normal → la cola se imprime al terminar.
+   - Resultado: el usuario nunca ve ni el marcador ni el paroteo de la
+     política.
+
+[COMPILACIÓN]
+dotnet build -c Release: OK · dotnet publish -c Release -o publish: OK
+
+================================================================================
+FIN DEL HISTORIAL
+================================================================================

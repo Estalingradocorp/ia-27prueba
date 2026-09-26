@@ -1,0 +1,17 @@
+# Build
+bin/
+obj/
+publish/
+
+# Runtime y logs
+logs/
+runtime/
+*.log
+
+# Configuración local
+config.json
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
