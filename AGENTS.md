@@ -36,6 +36,7 @@ Terminal de agente IA 100 % local en C# / .NET 8 + `llama.cpp`, sin Python. Est�
 ## Arquitectura
 
 - `Program.cs` — punto de entrada, tema de consola.
+- `Banner.cs` — banner de arranque con Spectre.Console (panel del logo, tabla de Estado, comandos reales — bitácora PARTE 23).
 - `AppConfig.cs` — configuración persistente (`config.json`).
 - `LlamaServerSession.cs` — lanza `llama-server.exe`, streaming SSE a `/v1/chat/completions`, **políticas del system prompt** (`NetPolicy`, `ToolsPolicy`).
 - `TerminalApplication.cs` — loop del agente, comandos `/`, búsqueda web por intención (dónde → Nominatim/OpenStreetMap; clima → Open-Meteo; general → Wikipedia con extracto + DuckDuckGo con el texto de la página ganadora — ver bitácora PARTE 22), **herramientas de agente** (`[[READ]]`, `[[CMD]]`, `[[WRITE]]`), intercepción de negativas del modelo.
@@ -74,6 +75,7 @@ Reglas de seguridad vigentes:
 - **Una sola copia del código y una sola del modelo.** Antes había dos carpetas de fuentes que divergían; ahora no. Si aparece una segunda copia, es un error.
 - **Nunca hacer `git add -A` a ciegas.** Una vez la copia de trabajo mostró 3 archivos versionados como borrados (`D`) y commitear eso los habría perdido para siempre. Un `D` en `git status` significa "ausente del disco, presente en el repo": se recuperan con `git restore`, no se commitean.
 - **El repositorio es el único respaldo.** Todo lo que importa va commiteado: el código, `icono.ico`, `AGENTS.md` y `IA27-BITACORA-MAESTRA-Y-REGLAS.txt`. Lo único que no entra es el `.gguf` (4,36 GB).
+- **Interfaz con Spectre.Console (PARTE 23).** El banner usa paneles/tablas de `Spectre.Console`, pero **el streaming de tokens es `Console.Write` puro, nunca `Markup`**: el contenido del modelo contiene `[SISTEMA · ...]` que Markup interpretaría como tag y se tragaría texto. Todo contenido de usuario/modelo dentro de un `Markup` va con `Markup.Escape`. La tabla de comandos del banner solo lista comandos que existan de verdad (hoy NO hay atajos `ctrl+x` ni pistas `@`/`!`: son las fases B y C de P16, no agregarlos al banner sin implementarlos). `AnsiConsole.Clear()` no está: no agregarlo sin decisión explícita.
 - **Búsqueda por intención (PARTE 22 de la bitácora).** El enrutado vive en `ClassifySearchIntent`/`SearchWebAsync`: `dónde` → Nominatim, `clima` → Open-Meteo, general → Wikipedia extracto + DDG con página ganadora. Reglas: (a) el `User-Agent` identificador de `CreateWebClient` es obligatorio para Nominatim, no quitarlo; (b) la geocodificación del clima lleva `countrycodes=ar` a propósito — sin eso "salta" matchea Salta Carnero (España), verificado en prueba real; la búsqueda general queda sin sesgo; (c) los verbos de intención se limpian en `CleanPlaceQuery`, no en la URL; (d) los recortes de ~1200-1600 caracteres por motor suben el contexto de 8192, no agrandarlos sin medir tokens.
 
 ## Layout y despliegue (reglas)

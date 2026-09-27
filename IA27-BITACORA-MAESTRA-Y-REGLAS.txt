@@ -19,11 +19,13 @@ Carpeta   : C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\
              logs\                             ← lo crea solo al arrancar
 Portable  : ia_terminal\publish\portable.exe
              CON los fixes (Job Object + mutex + logs, ver PARTE 19).
-Entrega   : portable 0.2.exe  ·  68.797.474 bytes  ·  2026-09-27 15:2x
-             SHA-256 7AEB42E94A867F23666B7623F08C8016153C94AEC3A2DC724B8FA295FFE63399
-             ACTUALIZADA el 27/9 con el código actual (búsqueda por intención,
-             PARTE 22). Ya no es la congelada de las 03:34: ver PARTE 17 para
-             el hash histórico y la regla de actualización.
+Entrega   : portable 0.2.exe  ·  69.889.039 bytes  ·  2026-09-27 16:0x
+             SHA-256 C5124DB102CD7C0D57D526FABD39E7326A787FA743E53609A5607006A3CEFD70
+             ACTUALIZADA el 27/9 con el código actual: búsqueda por intención
+             (PARTE 22) + interfaz Spectre.Console (PARTE 23). Es idéntica al
+             publish. Antes tuvo 7AEB42E9…63399 (con búsqueda, sin Spectre).
+             Ver PARTE 17 para el hash histórico de la congelada de las 03:34
+             (437F0212…D044F5) y la regla de actualización.
 Versión   : 0.2   ← CONGELADA (ver PARTE 21)
              0.1   (2026-09-27 02:23)  SIN los fixes de la PARTE 19. Ya no está
                    en esta máquina (se fue con el pendrive); queda su hash
@@ -47,6 +49,16 @@ Fase      : ENTRENAMIENTO. Se está probando al agente con tareas reales y se
             local por internet (Despensa Nancy, el almacén de la esquina).
             Con matices: los datos que no estaban en la búsqueda, los inventó
             (ver P15 punto 36).
+
+Actualizado: 2026-09-27 (interfaz) — banner nuevo con Spectre.Console (nuevo
+  archivo Banner.cs, paquete Spectre.Console 0.57.2). Fase A hecha: panel del
+  logo, tabla de Estado y comandos reales. NO se agregaron atajos ctrl+x ni
+  pistas @/! porque no existen (serían mentiras en pantalla): fases B y C en
+  P16. Reglas nuevas de interfaz en PARTE 23 y AGENTS.md.
+
+Actualizado: 2026-09-27 (entrega 2) — `portable 0.2.exe` se actualizó de nuevo
+  con la interfaz Spectre: 69.889.039 bytes, hash C5124DB1…CEFD70, idéntica
+  al publish. Regla de PARTE 17 aplicada: cambio de hash anotado.
 
 Actualizado: 2026-09-27 (entrega) — `portable 0.2.exe` se actualizó con el
   código actual (PARTE 22): 68.797.474 bytes, hash 7AEB42E9…63399, verificado
@@ -211,6 +223,7 @@ Archivos fuente, en C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\
 
 Tamaños y fechas (única copia, 27/9):
   TerminalApplication.cs  110.206 b  03:17:39   ← el más grande, el loop
+  Banner.cs               banner Spectre.Console (PARTE 23) — SIN COMMITEAR
   LlamaServerSession.cs    26.703 b  03:13:00
   ChildProcessJob.cs        4.745 b  03:12:40
   AGENTS.md                 7.655 b  02:24:34
@@ -614,47 +627,57 @@ Personalidad de interfaz (fijada en el código):
   - Estética Cyberpunk: negro, cian, azul oscuro; prompts "tú>" e "IA27>".
   - Mensajes de sistema entre corchetes: [SISTEMA · ...], [herramienta: ...].
 
-  MOCKUP de la interfaz real (sesión interactiva, 27/9):
+  MOCKUP de la interfaz real (sesión interactiva, 27/9, con el banner
+  Spectre.Console de la PARTE 23):
 
-    //============================== IR3C5.CORE ==============================//
-                     ####
-            ##       ####       ##
-             ####    #####    ####
-               #### ##### ####
-                 ##########
-        ##        ##########        ##
-          ####   ###########   ####
-            ###################
-       ################################
-            ###################
-          ####   ###########   ####
-        ##        ##########        ##
-                 ##########
-               #### ##### ####
-             ####    #####    ####
-            ##       ####       ##
-                     ####
-    //============================== ESTALINGRADO CORP ======================//
+    ╔═IR3C5.CORE═══════════════════════════════════════════════════════════════════╗
+    ║                                     ####                                     ║
+    ║                            ##       ####       ##                            ║
+    ║                             ####    #####    ####                            ║
+    ║                               #### ##### ####                                ║
+    ║                                 ##########                                   ║
+    ║                        ##        ##########        ##                        ║
+    ║                          ####   ###########   ####                           ║
+    ║                            ###################                               ║
+    ║                       ################################                       ║
+    ║                            ###################                               ║
+    ║                          ####   ###########   ####                           ║
+    ║                        ##        ##########        ##                        ║
+    ║                                 ##########                                   ║
+    ║                               #### ##### ####                                ║
+    ║                             ####    #####    ####                            ║
+    ║                            ##       ####       ##                            ║
+    ║                                     ####                                     ║
+    ╚══════════════════════════════════════════════════════════════════════════════╝
       INTRA-NET :: IA27 TERMINAL :: sistema local // canal seguro
-      ------------------------------------------------------------------------
-      modelo  : Atenea-Omega-IB2.gguf
-      origen  : C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\modelos
-      motor   : llama.cpp local // net: on // internet bajo autorización
-      ------------------------------------------------------------------------
-      /help ayuda · /clear limpiar · /use <modelo> cambiar · /exit salir
 
+                                    Estado
+    ╭──────────┬─────────────────────────────────────────────────────────╮
+    │ Campo    │ Valor                                                   │
+    ├──────────┼─────────────────────────────────────────────────────────┤
+    │ Modelo   │ Atenea-Omega-IB2.gguf                                   │
+    │ Origen   │ …ve\Desktop\Estalingrado corp\proyectos\IA 27 T\modelos │
+    │ Motor    │ llama.cpp local                                         │
+    │ Red      │ ● ON (bajo autorización)                                │
+    │ Contexto │ 8192 tokens · 8 hilos · 0 capas GPU                     │
+    ╰──────────┴─────────────────────────────────────────────────────────╯
+
+    Comandos rápidos
+    /help               ver comandos
+    /clear              limpiar historial
+    /use <modelo>       cambiar modelo
+    /net on|off         activar/desactivar red
+    /harness <objetivo> modo agéntico por pasos
+    /exit               salir
+    ────────────────────────────────────────────────────────────────────────────────
+    Listo. Escribe /help para ver los comandos. Ctrl+C detiene la respuesta en curso.
 
     Cargando el modelo; la primera carga puede tardar...
-    Listo. Escribe /help para ver los comandos del agente. Ctrl+C detiene la respuesta en curso.
-
 
     [INTRANET] ¿Permitir que el agente busque en internet automáticamente en esta sesión? (s/n): s
       Internet autorizado para esta sesión. El agente buscará automáticamente cuando necesite datos actuales.
 
-
     tú> hola atenea
-    IA27>
-    [aún generando; Ctrl+C para detener. Para respuestas más cortas usa /tokens 512]
     IA27> ¡Hola! ¿Cómo estás? Estoy aquí para ayudarte en lo que necesites. ¿En qué puedo asistirte hoy?
 
   OJO, no confundir: Atenea Omega Beta (IA-27) es el AGENTE que corre dentro
@@ -923,7 +946,16 @@ LO QUE SIGUE PENDIENTE:
      ese esquema (una sola entrega viva que se sobrescribe, con hash anotado
      cada vez) o se vuelve al esquema de versiones congeladas (0.3, 0.4…)?
      Mientras tanto, `portable 0.2.exe` ES el código actual y el hash a
-     anotar es 7AEB42E9…63399.
+     anotar es C5124DB1…CEFD70 (con Spectre, PARTE 23).
+ 15. Fase B de la interfaz (PARTE 23): menú de permisos con flechas
+     (SelectionPrompt) en vez de s/n, CON fallback a s/n cuando
+     Console.IsInputRedirected — si no, se rompen las pruebas con stdin
+     pipeado. Incluye panel rojo de advertencia para comandos destructivos.
+ 16. Fase C de la interfaz (PARTE 23): atajos ctrl+x reales (leer teclas) y
+     pistas @ (referenciar archivo) / ! (ejecutar comando). SOLO mostrar en el
+     banner lo que exista: hoy la tabla lista comandos reales y nada más.
+ 17. Candidato: el banner nuevo muestra el estado del config — si algún día se
+     agrega /stats (P16.7), ahí se le puede sumar la fila de tokens/s.
 
 ################################################################################
 # PARTE 17 — ENTREGAS CONGELADAS POR VERSIÓN
@@ -971,6 +1003,10 @@ Sirve para poder volver a una versión conocida que ya se probó buena.
            (búsqueda por intención, PARTE 22). Hash nuevo:
                7AEB42E94A867F23666B7623F08C8016153C94AEC3A2DC724B8FA295FFE63399
                68.797.474 bytes
+           ⚠ 27/9 16:0x: ACTUALIZACIÓN 2 — suma la interfaz Spectre.Console
+           (PARTE 23). Hash vigente de la entrega:
+               C5124DB102CD7C0D57D526FABD39E7326A787FA743E53609A5607006A3CEFD70
+               69.889.039 bytes (subió ~1 MB: el paquete Spectre.Console)
            El hash viejo (437F0212…D044F5) queda anotado arriba como HISTÓRICO: es
            el .exe que se probó en la prueba de Fury³ y falló. Si algún día hay
            que volver a ese estado, se reconstruye desde el commit anterior a la
@@ -1441,6 +1477,51 @@ PENDIENTE (misma saga, NO resuelto):
   - El modelo sigue pudiendo inventar datos que la búsqueda no devolvió
     (P15.36). La página ganadora y Open-Meteo lo reducen fuerte, pero la trampa
     de "dato sin fuente" sigue siendo el punto abierto de PARTE 16.
+
+################################################################################
+# PARTE 23 — INTERFAZ NUEVA CON SPECTRE.CONSOLE (fase A, 27/9)
+################################################################################
+
+QUÉ CAMBIÓ
+  El banner de arranque pasó de texto plano con colores fijos a paneles de
+  Spectre.Console: logo en panel de borde doble con header "IR3C5.CORE",
+  tabla de Estado redondeada (modelo, origen, motor, red, contexto/hilos/GPU)
+  y tabla de comandos reales. Nuevo archivo Banner.cs; PrintBanner() ahora es
+  una línea que llama a Banner.Render(config, model.Name).
+  Paquete nuevo: Spectre.Console 0.57.2 (dotnet add package Spectre.Console).
+
+QUÉ NO SE HIZO A PROPÓS (y por qué no hay que "completarlo" a ojo)
+  1) ATAJOS ctrl+x: no existen en el código (todo es ReadLine, no ReadKey).
+     Imprimirlos sería mentira en pantalla. Si algún día se implementan
+     (Fase C, P16), ahí recién se agregan a la tabla.
+  2) PISTAS @ / ! / ./. . : son features nuevas (referenciar archivo / ejecutar
+     comando con prefijo). No están; la tabla solo lista comandos EXISTENTES.
+  3) MENÚ DE PERMISOS con flechas (SelectionPrompt) → es la Fase B, P16. Requiere
+     fallback a s/n cuando la stdin está pipeada: mis pruebas automatizadas (y
+     cualquier uso en script) alimentan stdin, y un SelectionPrompt con ReadKey
+     ahí rompe. Además hoy el s/n es la única forma y funciona.
+
+REGLAS AL TOCAR LA INTERFAZ (agregar a AGENTS.md):
+  - STREAMING DE TOKENS: siempre Console.Write puro, NUNCA AnsiConsole.Markup.
+    Si el streaming pasa por Markup, "[SISTEMA" del contenido del modelo se
+    interpreta como tag de color y la consola se rompe o se traga texto.
+  - Todo lo que lleve contenido del usuario o del modelo dentro de Markup
+    (nombres de modelo, rutas, mensajes) va con Markup.Escape.
+  - La tabla de comandos del banner solo lista comandos que existan de verdad.
+  - AnsiConsole.Clear() NO está en el código (el banner original no limpiaba
+    la pantalla; no agregarlo sin decisión explícita).
+  - El tamaño del portable subió con Spectre.Console (solo en runtime, ~300 KB
+    sobre 68 MB): si hay que comparar hashes de entregas, usar el nuevo.
+
+VERIFICACIÓN (27/9):
+  · build 0 errores · publish OK.
+  · Sesión interactiva con stdin pipeado: banner renderiza bien ANTES de cargar
+    el modelo, la respuesta del modelo sale limpia, /exit no deja huérfanos
+    (verificado con Get-Process 5 s después: nada vivo).
+  · doctor OK · listar OK.
+
+Fases siguientes: B (menú de permisos con fallback) y C (atajos y @/!)
+  en P16.
 
 ################################################################################
 FIN DEL DOCUMENTO — IA27 TERMINAL · ESTALINGRADO CORP · INTRA-NET

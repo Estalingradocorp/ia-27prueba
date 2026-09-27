@@ -51,45 +51,54 @@ portable.exe help               # ayuda completa
 ### Mockup de la interfaz
 
 ```
-//============================== IR3C5.CORE ==============================//
-                 ####
-        ##       ####       ##
-         ####    #####    ####
-           #### ##### ####
-             ##########
-    ##        ##########        ##
-      ####   ###########   ####
-        ###################
-   ################################
-        ###################
-      ####   ###########   ####
-    ##        ##########        ##
-             ##########
-           #### ##### ####
-         ####    #####    ####
-        ##       ####       ##
-                 ####
-//============================== ESTALINGRADO CORP ======================//
+╔═IR3C5.CORE═══════════════════════════════════════════════════════════════════╗
+║                                     ####                                     ║
+║                            ##       ####       ##                            ║
+║                             ####    #####    ####                            ║
+║                               #### ##### ####                                ║
+║                                 ##########                                   ║
+║                        ##        ##########        ##                        ║
+║                          ####   ###########   ####                           ║
+║                            ###################                               ║
+║                       ################################                       ║
+║                            ###################                               ║
+║                          ####   ###########   ####                           ║
+║                        ##        ##########        ##                        ║
+║                                 ##########                                   ║
+║                               #### ##### ####                                ║
+║                             ####    #####    ####                            ║
+║                            ##       ####       ##                            ║
+║                                     ####                                     ║
+╚══════════════════════════════════════════════════════════════════════════════╝
   INTRA-NET :: IA27 TERMINAL :: sistema local // canal seguro
-  ------------------------------------------------------------------------
-  modelo  : Atenea-Omega-IB2.gguf
-  origen  : C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\modelos
-  motor   : llama.cpp local // net: on // internet bajo autorización
-  ------------------------------------------------------------------------
-  /help ayuda · /clear limpiar · /use <modelo> cambiar · /exit salir
 
+                                Estado
+╭──────────┬─────────────────────────────────────────────────────────╮
+│ Campo    │ Valor                                                   │
+├──────────┼─────────────────────────────────────────────────────────┤
+│ Modelo   │ Atenea-Omega-IB2.gguf                                   │
+│ Origen   │ …ve\Desktop\Estalingrado corp\proyectos\IA 27 T\modelos │
+│ Motor    │ llama.cpp local                                         │
+│ Red      │ ● ON (bajo autorización)                                │
+│ Contexto │ 8192 tokens · 8 hilos · 0 capas GPU                     │
+╰──────────┴─────────────────────────────────────────────────────────╯
+
+Comandos rápidos
+/help               ver comandos
+/clear              limpiar historial
+/use <modelo>       cambiar modelo
+/net on|off         activar/desactivar red
+/harness <objetivo> modo agéntico por pasos
+/exit               salir
+────────────────────────────────────────────────────────────────────────────────
+Listo. Escribe /help para ver los comandos. Ctrl+C detiene la respuesta en curso.
 
 Cargando el modelo; la primera carga puede tardar...
-Listo. Escribe /help para ver los comandos del agente. Ctrl+C detiene la respuesta en curso.
-
 
 [INTRANET] ¿Permitir que el agente busque en internet automáticamente en esta sesión? (s/n): s
   Internet autorizado para esta sesión. El agente buscará automáticamente cuando necesite datos actuales.
 
-
 tú> hola atenea
-IA27>
-[aún generando; Ctrl+C para detener. Para respuestas más cortas usa /tokens 512]
 IA27> ¡Hola! ¿Cómo estás? Estoy aquí para ayudarte en lo que necesites. ¿En qué puedo asistirte hoy?
 ```
 

@@ -2790,54 +2790,7 @@ public sealed class TerminalApplication
 
     private void PrintBanner(ModelDescriptor model)
     {
-        string[] logo =
-        {
-            "               ####               ",
-            "      ##       ####       ##      ",
-            "       ####    #####    ####      ",
-            "         #### ##### ####         ",
-            "           ##########            ",
-            "  ##        ##########        ##  ",
-            "    ####   ###########   ####    ",
-            "      ###################        ",
-            " ################################ ",
-            "      ###################        ",
-            "    ####   ###########   ####    ",
-            "  ##        ##########        ##  ",
-            "           ##########            ",
-            "         #### ##### ####         ",
-            "       ####    #####    ####     ",
-            "      ##       ####       ##     ",
-            "               ####              "
-        };
-
-        Console.ForegroundColor = ConsoleColor.DarkBlue;
-        Console.WriteLine("//============================== IR3C5.CORE ==============================//");
-        var logoWidth = logo.Max(line => line.Length);
-        foreach (var line in logo)
-        {
-            var padding = new string(' ', (logoWidth - line.Length) / 2);
-            Console.ForegroundColor = ConsoleColor.Blue;
-            Console.Write("  ");
-            Console.WriteLine(padding + line);
-        }
-
-        Console.ForegroundColor = ConsoleColor.DarkBlue;
-        Console.WriteLine("//============================== ESTALINGRADO CORP ======================//");
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine("  INTRA-NET :: IA27 TERMINAL :: sistema local // canal seguro");
-        Console.ForegroundColor = ConsoleColor.DarkBlue;
-        Console.WriteLine("  ------------------------------------------------------------------------");
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine($"  modelo  : {model.Name}");
-        Console.WriteLine($"  origen  : {config.ModelDirectory}");
-        Console.WriteLine($"  motor   : llama.cpp local // net: {(config.NetEnabled ? "on" : "off")} // internet bajo autorización");
-        Console.ForegroundColor = ConsoleColor.DarkBlue;
-        Console.WriteLine("  ------------------------------------------------------------------------");
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.WriteLine("  /help ayuda · /clear limpiar · /use <modelo> cambiar · /exit salir");
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine();
+        Banner.Render(config, model.Name);
     }
 
     private static void PrintHistory(LlamaServerSession session)
