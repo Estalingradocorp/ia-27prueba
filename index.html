@@ -38,6 +38,23 @@
             cursor: pointer;
             font-size: 16px;
         }
+        footer {
+            text-align: center;
+            padding: 30px 10px;
+            color: #5d6d7e;
+            font-size: 14px;
+        }
+        footer .credit {
+            display: inline-block;
+            background: #fff;
+            border: 1px solid #d5dbdb;
+            border-radius: 6px;
+            padding: 10px 18px;
+        }
+        footer .model {
+            color: #2c3e50;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -47,6 +64,12 @@
             <button onclick="doSearch()">Buscar</button>
         </div>
     </header>
+    <footer>
+        <div class="credit">
+            Esta página está siendo diseñada con nuestro modelo
+            <span class="model">IA 27 Atenea Omega IB</span>
+        </div>
+    </footer>
     <script>
         function doSearch() {
             var query = document.getElementById("searchBox").value;
