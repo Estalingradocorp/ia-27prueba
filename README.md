@@ -2,7 +2,7 @@
 
 > **ESTALINGRADO CORP · INTRA-NET** — agente de IA 100 % local, en consola, estilo Cyberpunk.
 
-Terminal de inteligencia artificial que corre **modelos GGUF de forma local** con `llama.cpp`, sin Python, sin servicios cloud y sin enviar nada a un servidor externo. Hablas con el agente en español y, si lo autorizas, puede buscar en internet para darte datos reales en vez de inventar.
+Terminal de inteligencia artificial que corre **modelos GGUF de forma local** con `llama.cpp`, sin Python, sin servicios cloud y sin enviar nada a un servidor externo. Hablas con el agente en español y, si lo autorizas, puede buscar en internet, **leer tus archivos, ejecutar comandos de PowerShell y crear archivos** — siempre bajo tu control.
 
 ![Captura de la IA27 Terminal](Capturas/ia27-terminal.png)
 
@@ -14,6 +14,7 @@ Terminal de inteligencia artificial que corre **modelos GGUF de forma local** co
 - **Búsqueda en internet con permiso** — el agente emite el marcador `[[NET]]`, el sistema te pregunta una sola vez por sesión y, si autorizas, busca en DuckDuckGo / Wikipedia e inyecta los resultados reales en el contexto.
 - **Anti-alucinación** — si el modelo no está seguro de un dato (empresas, personas, eventos, precios, noticias), **busca en lugar de inventar**. Si la búsqueda no arroja nada, lo dice claramente.
 - **Búsqueda explícita del usuario** — si escribes `busca en internet <tema>`, `investiga <tema>` o `<tema> en la web`, la terminal busca directamente sin depender del modelo.
+- **Herramientas de agente (READ / CMD / WRITE)** — el agente puede leer archivos y carpetas, ejecutar comandos de PowerShell y crear o reescribir archivos mediante los marcadores `[[READ]]`, `[[CMD]]` y `[[WRITE]]`. Ejecución y escritura **siempre piden tu confirmación (s/n)**. Máximo 5 herramientas encadenadas por turno.
 - **Gestor de modelos integrado** — descarga, lista y cambia entre modelos GGUF desde la propia terminal.
 - **Diagnóstico** — comando `doctor` que comprueba modelo, runtime y hardware.
 
@@ -72,6 +73,23 @@ Al arrancar la sesión se pregunta **una sola vez** si autorizas que el agente b
 - **Sí** — el agente busca por su cuenta cuando el dato es actual o no lo conoce, y te imprime `[buscando en la web...]` antes de responder.
 - **No** — responde solo con su conocimiento local y te pide permiso cada vez que necesite buscar.
 
+### Herramientas de agente
+
+El agente dispone de tres herramientas sobre tu equipo. Puede decidir usarlas por su cuenta (igual que `[[NET]]`) o tú puedes pedirlo directamente con frases como `lee el archivo X`, `ejecuta <comando>` o `creame el archivo X que diga ...`:
+
+| Marcador | Acción | Confirmación |
+| --- | --- | --- |
+| `[[READ]] ruta` | Lee un archivo (máx. 4000 chars) o lista una carpeta | No, salvo fuera del área de trabajo |
+| `[[CMD]] comando` | Ejecuta PowerShell (cwd del proyecto, timeout 30 s) | Siempre (s/n) |
+| `[[WRITE]] ruta :: contenido` | Crea o reemplaza un archivo (con vista previa) | Siempre (s/n) |
+
+Seguridad:
+
+- Los comandos con patrones potencialmente destructivos (`Remove-Item -Recurse -Force`, `format`, `shutdown`, etc.) muestran una **advertencia en rojo** antes de pedir permiso.
+- Las rutas se resuelven contra el área de trabajo; lecturas fuera de ella requieren permiso explícito.
+- Los marcadores nunca se muestran en pantalla (buffer anti-fugas del streaming).
+- Si deniegas una acción, el agente lo informa claramente en lugar de inventar el resultado.
+
 ## Configuración
 
 Se guarda en `config.json` (en la carpeta de la aplicación). Se puede ver y modificar desde la terminal:
@@ -107,7 +125,7 @@ AppConfig.cs                configuración persistente
 ModelCatalog.cs             escaneo de archivos .gguf
 GgufMetadataReader.cs       lector de metadatos GGUF
 LlamaServerSession.cs       sesión de inferencia (streaming SSE)
-TerminalApplication.cs      lógica de terminal, comandos y búsqueda web
+TerminalApplication.cs      lógica de terminal, comandos, búsqueda web y herramientas de agente
 ModelRegistry.cs            catálogo de modelos descargables
 Capturas/                   capturas de pantalla
 ```

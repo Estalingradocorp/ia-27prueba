@@ -28,6 +28,8 @@ public sealed class LlamaServerSession : IAsyncDisposable
 
     private const string NetPolicy = "ACCESO A INTERNET: está habilitado bajo autorización del usuario y TÚ SÍ PUEDES buscar en internet a través del sistema. NUNCA digas que no puedes navegar ni que no tienes acceso a internet: eso es falso. REGLA OBLIGATORIA: si el usuario pregunta por una entidad concreta (empresa, corporación, persona, producto, lugar, organización, evento) o por datos actuales o específicos (noticias, clima, precios, fechas, estadísticas) y no tienes certeza absoluta del dato, tu mensaje debe EMPEZAR directamente con [[NET]] seguido de la consulta breve (máximo 12 palabras), sin ningún texto, explicación ni comilla antes o después. Ejemplo de salida válida: \"[[NET]] Estalingrado Corp empresa\". El sistema buscará por ti y te llegará un mensaje con los resultados reales para responder con ellos. Si no llegan resultados o el usuario lo deniega, responde con tu propio conocimiento dejando claro que no está verificado. Ante la duda, busca: es preferible a dar un dato inventado.";
 
+    private const string ToolsPolicy = "HERRAMIENTAS LOCALES: tienes tres herramientas del sistema para actuar sobre el equipo del usuario. NUNCA digas que no puedes leer archivos ni ejecutar comandos: sí puedes, a través de estas herramientas. Para usar una herramienta, tu mensaje debe EMPEZAR directamente con el marcador correspondiente y nada más antes, sin texto, explicación ni comillas previas: [[READ]] seguido de la ruta de un archivo o carpeta (lee el archivo o lista la carpeta; úsala cuando el usuario pida ver, analizar, resumir o revisar archivos locales); [[CMD]] seguido de un comando de PowerShell (el sistema pedirá permiso al usuario y luego lo ejecuta); [[WRITE]] + ruta + \" :: \" + el contenido completo del archivo (crea o reemplaza el archivo; pide permiso al usuario). Ejemplo de salida válida: \"[[READ]] C:\\proyecto\\Program.cs\". Ejemplo de salida válida: \"[[CMD]] Get-ChildItem\". Ejemplo de salida válida: \"[[WRITE]] C:\\proyecto\\nota.txt :: hola mundo\". Tras usar una herramienta recibirás su resultado real en el siguiente mensaje: responde con esos datos y nunca inventes el resultado. Si el usuario deniega el permiso o la herramienta falla, infórmalo sin inventar.";
+
     public LlamaServerSession(AppConfig config, ModelDescriptor model)
     {
         this.config = config;
@@ -360,7 +362,13 @@ public sealed class LlamaServerSession : IAsyncDisposable
 
     private string BuildSystemPrompt()
     {
-        return config.NetEnabled ? config.SystemPrompt + Environment.NewLine + Environment.NewLine + NetPolicy : config.SystemPrompt;
+        var prompt = config.SystemPrompt;
+        if (config.NetEnabled)
+        {
+            prompt += Environment.NewLine + Environment.NewLine + NetPolicy;
+        }
+
+        return prompt + Environment.NewLine + Environment.NewLine + ToolsPolicy;
     }
 
     public async ValueTask DisposeAsync()

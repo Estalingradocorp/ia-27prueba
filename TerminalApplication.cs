@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Text;
@@ -480,6 +481,7 @@ public sealed class TerminalApplication
             case "/ayuda":
                 Console.WriteLine("/help  /clear  /history  /system [texto]  /modelos  /cambiar  /use <selector>  /descargar  /temp [valor]  /rp [valor]  /topp [valor]  /tokens [valor]  /net [on|off]  /exit");
                 Console.WriteLine("Ctrl+C detiene la respuesta en curso; /tokens 512 produce respuestas más cortas.");
+                Console.WriteLine("Herramientas del agente: puede leer archivos/carpetas ([[READ]]), ejecutar comandos PowerShell ([[CMD]]) y crear archivos ([[WRITE]]); ejecución y escritura siempre piden tu permiso (s/n).");
                 break;
             case "/clear":
             case "/limpiar":
@@ -864,6 +866,325 @@ public sealed class TerminalApplication
         query = candidate;
         return true;
     }
+    // ===== Herramientas de agente: READ / CMD / WRITE =====
+
+    private static readonly Regex ReadRequestPattern = new(@"\[\[READ\]\]\s*(?<path>[^\r\n]+)", RegexOptions.Compiled);
+    private static readonly Regex CmdRequestPattern = new(@"\[\[CMD\]\]\s*(?<cmd>[^\r\n]+)", RegexOptions.Compiled);
+    private static readonly Regex WriteRequestPattern = new(@"\[\[WRITE\]\]\s*(?<path>[^\r\n]+?)\s*::\s*(?<body>[\s\S]*)$", RegexOptions.Compiled);
+    private static readonly Regex DangerousCommandPattern = new(@"\b(?:format|diskpart|bcdedit|vssadmin)\b|remove-item[^\r\n]*-recurse[^\r\n]*-force|rm\s+-rf|del\s+/[sq]|rd\s+/s|shutdown|restart-computer|stop-computer|reg\s+delete|takeown|icacls[^\r\n]*/reset|clear-disk|initialize-disk|set-executionpolicy\s+unrestricted", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private sealed record ToolRequest(string Kind, string Argument, string? Body);
+
+    private static ToolRequest? MatchToolRequest(string content)
+    {
+        var writeMatch = WriteRequestPattern.Match(content);
+        if (writeMatch.Success)
+        {
+            return new ToolRequest("WRITE", writeMatch.Groups["path"].Value.Trim().Trim('"'), writeMatch.Groups["body"].Value);
+        }
+
+        var cmdMatch = CmdRequestPattern.Match(content);
+        if (cmdMatch.Success)
+        {
+            return new ToolRequest("CMD", cmdMatch.Groups["cmd"].Value.Trim().Trim('"'), null);
+        }
+
+        var readMatch = ReadRequestPattern.Match(content);
+        if (readMatch.Success)
+        {
+            return new ToolRequest("READ", readMatch.Groups["path"].Value.Trim().Trim('"'), null);
+        }
+
+        return null;
+    }
+
+    private static string StripToolMarkers(string content)
+    {
+        var cleaned = WriteRequestPattern.Replace(content, string.Empty);
+        cleaned = CmdRequestPattern.Replace(cleaned, string.Empty);
+        cleaned = ReadRequestPattern.Replace(cleaned, string.Empty);
+        return cleaned.TrimEnd();
+    }
+
+    private static bool IsInsideSandbox(string path)
+    {
+        var roots = new[]
+        {
+            Path.GetFullPath(Environment.CurrentDirectory),
+            Path.GetFullPath(AppContext.BaseDirectory),
+            Path.GetFullPath(AppConfig.DefaultModelDirectory)
+        };
+        foreach (var root in roots)
+        {
+            if (path.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string ResolveToolPath(string rawPath)
+    {
+        string path;
+        try
+        {
+            path = Path.GetFullPath(Environment.ExpandEnvironmentVariables(rawPath), Environment.CurrentDirectory);
+        }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new TerminalException($"Ruta inválida: {rawPath}");
+        }
+
+        return path;
+    }
+
+    private static string ExecuteReadTool(string rawPath)
+    {
+        var path = ResolveToolPath(rawPath);
+        if (Directory.Exists(path))
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine($"Contenido de la carpeta {path}:");
+            var count = 0;
+            foreach (var directory in Directory.EnumerateDirectories(path))
+            {
+                if (++count > 150) { builder.AppendLine("... (lista truncada)"); break; }
+                builder.AppendLine($"  [carpeta] {Path.GetFileName(directory)}");
+            }
+            foreach (var file in Directory.EnumerateFiles(path))
+            {
+                if (++count > 150) { builder.AppendLine("... (lista truncada)"); break; }
+                var info = new FileInfo(file);
+                builder.AppendLine($"  {Path.GetFileName(file)} ({info.Length:N0} bytes)");
+            }
+
+            return count == 0 ? $"La carpeta {path} está vacía." : builder.ToString().TrimEnd();
+        }
+
+        if (File.Exists(path))
+        {
+            string text;
+            try
+            {
+                text = File.ReadAllText(path);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                throw new TerminalException($"No se pudo leer el archivo: {error.Message}");
+            }
+
+            if (text.Length > 4000)
+            {
+                text = text[..4000] + "\n... [contenido truncado: archivo más largo que 4000 caracteres]";
+            }
+
+            return $"Contenido de {path}:\n{text}";
+        }
+
+        throw new TerminalException($"No existe el archivo ni la carpeta: {path}");
+    }
+
+    private static async Task<string> ExecuteCmdToolAsync(string command, CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo("powershell.exe")
+        {
+            WorkingDirectory = Environment.CurrentDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-Command");
+        startInfo.ArgumentList.Add(command);
+
+        using var process = Process.Start(startInfo) ?? throw new TerminalException("No se pudo iniciar PowerShell.");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            return $"El comando excedió el límite de 30 segundos y fue detenido: {command}";
+        }
+
+        var output = (await outputTask).Trim();
+        var error = (await errorTask).Trim();
+        var builder = new StringBuilder();
+        builder.AppendLine($"Comando ejecutado (carpeta {Environment.CurrentDirectory}): {command}");
+        builder.AppendLine($"Código de salida: {process.ExitCode}");
+        if (output.Length > 0)
+        {
+            builder.AppendLine("Salida:");
+            builder.AppendLine(Truncate(output, 2000));
+        }
+
+        if (error.Length > 0)
+        {
+            builder.AppendLine("Errores:");
+            builder.AppendLine(Truncate(error, 1000));
+        }
+
+        if (output.Length == 0 && error.Length == 0)
+        {
+            builder.AppendLine("(sin salida)");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string ExecuteWriteTool(string rawPath, string body)
+    {
+        var path = ResolveToolPath(rawPath);
+        var parent = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(parent))
+        {
+            Directory.CreateDirectory(parent);
+        }
+
+        File.WriteAllText(path, body, new UTF8Encoding(false));
+        return $"Archivo escrito: {path} ({new FileInfo(path).Length:N0} bytes).";
+    }
+
+    private bool ConfirmTool(string prompt, bool dangerous, CancellationToken cancellationToken)
+    {
+        Console.ForegroundColor = dangerous ? ConsoleColor.Red : ConsoleColor.Yellow;
+        if (dangerous)
+        {
+            Console.WriteLine("[ADVERTENCIA] El comando coincide con un patrón potencialmente destructivo.");
+        }
+
+        Console.Write($"{(dangerous ? "[PELIGRO]" : "[SOLICITUD]")} {Truncate(prompt, 120)} ¿Permitir? (s/n): ");
+        Console.ForegroundColor = ConsoleColor.White;
+        var line = Console.ReadLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        cancellationToken.ThrowIfCancellationRequested();
+        return line?.Trim().ToLowerInvariant() is "s" or "si" or "sí" or "y" or "yes";
+    }
+
+    private async Task<string> ExecuteToolWithPermissionAsync(ToolRequest tool, bool explicitByUser, CancellationToken cancellationToken)
+    {
+        string result;
+        switch (tool.Kind)
+        {
+            case "READ":
+                var readPath = ResolveToolPath(tool.Argument);
+                var insideSandbox = IsInsideSandbox(readPath);
+                if (!insideSandbox && !explicitByUser)
+                {
+                    Console.WriteLine();
+                    if (!ConfirmTool($"El agente quiere LEER fuera del área de trabajo: {readPath}", dangerous: false, cancellationToken))
+                    {
+                        return "[SISTEMA · el usuario denegó la lectura del archivo]\nInforma al usuario de que no se pudo leer el archivo porque denegó el permiso, sin inventar su contenido.";
+                    }
+                }
+
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkBlue;
+                Console.Write("[herramienta: READ] ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                result = ExecuteReadTool(tool.Argument);
+                Console.WriteLine($"leyendo {Truncate(readPath, 60)}... listo.");
+                break;
+            case "CMD":
+                var dangerous = DangerousCommandPattern.IsMatch(tool.Argument);
+                Console.WriteLine();
+                if (!ConfirmTool($"El agente quiere EJECUTAR en PowerShell: {tool.Argument}", dangerous, cancellationToken))
+                {
+                    return "[SISTEMA · el usuario denegó la ejecución del comando]\nInforma al usuario de que la acción fue denegada; no inventes ningún resultado del comando.";
+                }
+
+                Console.ForegroundColor = ConsoleColor.DarkBlue;
+                Console.Write("[herramienta: CMD] ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                result = await ExecuteCmdToolAsync(tool.Argument, cancellationToken);
+                Console.WriteLine("ejecutando... listo.");
+                break;
+            case "WRITE":
+                var writePath = ResolveToolPath(tool.Argument);
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Gray;
+                Console.WriteLine($"  Contenido ({(tool.Body ?? string.Empty).Length} caracteres): {Truncate((tool.Body ?? string.Empty).Replace("\r", " ").Replace("\n", " ⏎ "), 160)}");
+                if (!ConfirmTool($"El agente quiere ESCRIBIR el archivo: {writePath}", dangerous: false, cancellationToken))
+                {
+                    return "[SISTEMA · el usuario denegó la escritura del archivo]\nInforma al usuario de que la escritura fue denegada; no digas que el archivo se creó.";
+                }
+
+                Console.ForegroundColor = ConsoleColor.DarkBlue;
+                Console.Write("[herramienta: WRITE] ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                result = ExecuteWriteTool(tool.Argument, tool.Body ?? string.Empty);
+                Console.WriteLine("escribiendo... listo.");
+                break;
+            default:
+                return string.Empty;
+        }
+
+        return $"[SISTEMA · resultado de herramienta {(explicitByUser ? "pedida por el usuario" : "iniciada por el agente")}]\n{result}\nUsa este resultado real para responder al usuario; no inventes datos y no vuelvas a llamar a la misma herramienta si ya tienes la respuesta.";
+    }
+
+    // Intención explícita del usuario: "lee X", "ejecuta Y", "crea el archivo Z con..."
+    private static readonly Regex ExplicitReadIntent = new(@"^\s*(?:lee|l[ée]eme|leer|abr[íi]|mostr[áa](?:me)?|muestra|revisa|analiza|resum[íi])\s+(?:(?:el|la|los|las|este|esta|un|una)\s+)?(?:archivo|fichero|carpeta|directorio|contenido\s+de)\s*:?\s*(?<path>.+?)\s*[.!?]*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ExplicitCmdIntent = new(@"^\s*(?:ejecuta(?:me)?|ejecutar|corre(?:me)?|correr|lanza(?:r)?)\s+(?:el\s+comando\s+)?(?<cmd>.+?)\s*[.!?]*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ExplicitWriteIntent = new(@"^\s*(?:crea(?:me)?|crear|escribe(?:me)?|escribir|genera(?:me)?)\s+(?:un\s+)?(?:el\s+)?archivo\s+(?<path>[^\s:]+(?::[^\s]*)?)(?:\s+(?:con|que\s+(?:diga|contenga|tenga)|con\s+el\s+contenido))\s*:?\s*(?<body>.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static bool LooksLikePath(string value)
+    {
+        if (value.Contains("://", StringComparison.Ordinal) || value.Length < 2 || value.Length > 300)
+        {
+            return false;
+        }
+
+        if (value.Contains(':') || value.Contains('\\') || value.Contains('/'))
+        {
+            return true;
+        }
+
+        // Nombre simple con extensión o ruta que existe relativa a la carpeta actual
+        return Regex.IsMatch(value, @"^[\w .\-()áéíóúñÁÉÍÓÚÑ]+\.\w{1,8}$");
+    }
+
+    private static bool TryExtractExplicitTool(string prompt, out ToolRequest tool)
+    {
+        tool = null!;
+        var writeMatch = ExplicitWriteIntent.Match(prompt);
+        if (writeMatch.Success && LooksLikePath(writeMatch.Groups["path"].Value))
+        {
+            tool = new ToolRequest("WRITE", writeMatch.Groups["path"].Value.Trim().Trim('"'), writeMatch.Groups["body"].Value);
+            return true;
+        }
+
+        var readMatch = ExplicitReadIntent.Match(prompt);
+        if (readMatch.Success && LooksLikePath(readMatch.Groups["path"].Value))
+        {
+            tool = new ToolRequest("READ", readMatch.Groups["path"].Value.Trim().Trim('"'), null);
+            return true;
+        }
+
+        var cmdMatch = ExplicitCmdIntent.Match(prompt);
+        if (cmdMatch.Success)
+        {
+            var candidate = cmdMatch.Groups["cmd"].Value.Trim();
+            if (candidate.Length >= 2 && candidate.Length <= 300)
+            {
+                tool = new ToolRequest("CMD", candidate, null);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static readonly HttpClient WebClient = CreateWebClient();
 
     private static HttpClient CreateWebClient()
@@ -915,7 +1236,23 @@ public sealed class TerminalApplication
 
         void DiscardBuffer() => streamBuffer.Clear();
 
-        if (config.NetEnabled && TryExtractExplicitSearchQuery(prompt, out var explicitQuery))
+        if (TryExtractExplicitTool(prompt, out var explicitTool))
+        {
+            try
+            {
+                var explicitResult = await ExecuteToolWithPermissionAsync(explicitTool, explicitByUser: true, cancellationToken);
+                session.AddContextMessage(explicitResult + $"\nPedido original del usuario: \"{prompt}\"");
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkBlue;
+                Console.Write("IA27> ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+            }
+            catch (TerminalException toolError)
+            {
+                session.AddContextMessage($"[SISTEMA · herramienta fallida]\n{toolError.Message}\nInforma al usuario del error sin inventar resultados. Pedido original: \"{prompt}\"");
+            }
+        }
+        else if (config.NetEnabled && TryExtractExplicitSearchQuery(prompt, out var explicitQuery))
         {
             var explicitAuthorized = session.NetAutoAllowed || AuthorizeNet(session, explicitQuery, cancellationToken);
             if (explicitAuthorized)
@@ -939,10 +1276,48 @@ public sealed class TerminalApplication
 
         var content = await session.AskAsync(prompt, bufferedToken, cancellationToken);
         var netRounds = 0;
+        var toolRounds = 0;
         var originalPrompt = prompt;
         var searchContext = (string?)null;
         while (true)
         {
+            var toolRequest = MatchToolRequest(content);
+            if (toolRequest is not null)
+            {
+                if (toolRounds >= 5)
+                {
+                    DiscardBuffer();
+                    session.ReplaceLastAssistant(StripToolMarkers(content));
+                    return "Alcancé el límite de 5 usos de herramientas seguidos en este turno; reformulá el pedido o continúalo en otro mensaje.";
+                }
+
+                toolRounds++;
+                DiscardBuffer();
+                var cleanedTool = StripToolMarkers(content);
+                session.ReplaceLastAssistant(cleanedTool);
+                string toolContext;
+                try
+                {
+                    toolContext = await ExecuteToolWithPermissionAsync(toolRequest, explicitByUser: false, cancellationToken);
+                }
+                catch (TerminalException toolError)
+                {
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[herramienta: {toolRequest.Kind}] error: {toolError.Message}");
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    toolContext = $"[SISTEMA · herramienta {toolRequest.Kind} fallida]\n{toolError.Message}\nInforma al usuario del error; no inventes el resultado.";
+                }
+
+                session.AddContextMessage(toolContext);
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkBlue;
+                Console.Write("IA27> ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                content = await session.AskContinueAsync(bufferedToken, cancellationToken);
+                continue;
+            }
+
             var match = NetRequestPattern.Match(content);
             var isRefusal = !match.Success && config.NetEnabled && NetRefusalPattern.IsMatch(content);
             if (isRefusal)
