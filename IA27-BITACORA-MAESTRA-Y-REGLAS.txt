@@ -1,0 +1,1065 @@
+================================================================================
+ESTALINGRADO CORP · INTRA-NET
+IA27 TERMINAL — BITÁCORA MAESTRA, MÉTODOS Y REGLAS
+================================================================================
+Proyecto  : Agente IA local (C#/.NET 8 + llama.cpp, sin Python)
+AGENTE    : opencode  ← el que programa y mantiene esto (ver PARTE 2)
+Este doc  : IA27-BITACORA-MAESTRA-Y-REGLAS.txt, EN EL REPO (raíz de
+            ia_terminal\), junto a AGENTS.md. Se versiona con el código, así
+            que viaja con él y no hay que acordarse de copiarlo a mano.
+Carpeta   : C:\Users\nicot\OneDrive\Desktop\IA 27 T\
+             ia_terminal\                      ← código fuente + .git + este doc
+             ia_terminal\publish\portable.exe  ← el ejecutable real
+             portable 0.2.exe                  ← entrega congelada (ver P17)
+             runtime\                         ← llama-server.exe + DLLs
+             modelos\                          ← el .gguf (4,36 GB)
+             config.json                       ← configuración de la entrega
+             logs\                             ← lo crea solo al arrancar
+Portable  : ia_terminal\publish\portable.exe
+             CON los fixes (Job Object + mutex + logs, ver PARTE 19).
+Entrega   : portable 0.2.exe  ·  68.772.898 bytes  ·  2026-09-27 03:34
+             SHA-256 437F0212D68A331C28A29CB6F3835FC331D3FE8C8F6E27A80405245E27D044F5
+             Montada y verificada 03:45, reverificada el 27/9 04:25 y de nuevo
+             tras el cambio de carpeta del modelo. Es la buena.
+Versión   : 0.2   ← ACTUAL
+             0.1   (2026-09-27 02:23)  SIN los fixes de la PARTE 19. Ya no está
+                   en esta máquina (se fue con el pendrive); queda su hash
+                   anotado en la P17 por si hay que reconstruirla.
+Modelo    : modelos\Atenea-Omega-IB2.gguf  (Qwen2.5-7B-Instruct Q4_K_M)
+            4.683.074.240 bytes · 4,36 GB
+            hash 65B8FCD92AF6B4FEFA935C625D1AC27EA29DCB6EE14589C55A8F115CEAAA1423
+Repo      : https://github.com/Estalingradocorp/IA27Terminal-.git  (privado)
+CPU/GPU   : Intel i3-10100F (8 lógicos) · 15,9 GB RAM · GTX 1050 Ti 4 GB
+            GPU INUTILIZABLE: el runtime es solo CPU. Ver PARTE 12.
+SDK       : .NET 8.0.424
+C: libre  : 339,4 GB
+Estado    : TODO LOCAL Y TODO VERSIONADO. Una sola copia del código, un solo
+            modelo, una sola entrega, un solo .git (ver P2).
+
+Actualizado: 2026-09-27 04:55
+  · ESTA BITÁCORA ENTRA AL REPO. Estaba fuera de ia_terminal\, o sea que no se
+    versionaba y había que copiarla a mano. Ahora está en la raíz del repo, al
+    lado de AGENTS.md, y viaja con el código.
+  · Se recuperaron del commit 6b0d32c los 3 archivos que faltaban en la copia
+    de trabajo (Capturas\*.png ×2 e Historial de Chats\*.txt). No se habían
+    perdido: el "D" de git status era ausencia local, no en el repo. Ver P15/24.
+  · Se subió el código pendiente, incluido ChildProcessJob.cs, que era el fix
+    de la P19 y vivía solo en el disco.
+  · FIN DEL TRABAJO EN DOS COPIAS. Se eliminó de este documento todo lo del
+    pendrive y de la copia de D:. Ahora hay UNA carpeta de código, en C:.
+  · P2 rehecha: el agente de código es OPENCODE, y su regla es que existe una
+    sola copia. La saga de "dónde estaba el .git" terminó.
+  · Los 2 config.json apuntaban a una unidad que ya no está, así que la entrega
+    no encontraba el modelo. Corregido: el modelo vive ahora en modelos\ y los
+    2 config.json apuntan ahí. Verificado con `listar` → OK.
+  · Queda un .gguf DUPLICADO en la ruta vieja. Ver P16 punto 2.
+================================================================================
+
+################################################################################
+# PARTE 1 — REGLA OBLIGATORIA DEL PORTABLE
+################################################################################
+
+*** DESPUÉS DE CUALQUIER CAMBIO EN EL CÓDIGO, COMPILAR Y PUBLICAR. SIEMPRE. ***
+
+    dotnet build   -c Release
+    dotnet publish -c Release -o publish
+
+Reglas del despliegue:
+
+1. El entregable real es publish\portable.exe (self-contained, single-file,
+   ~67 MB). Un cambio de código que no llega al portable NO EXISTE para el
+   usuario.
+2. Nunca terminar una tarea de código sin dejar el portable regenerado y
+   verificado.
+3. CERRAR la terminal antes de publicar. Si portable.exe está corriendo, el
+   publish falla con:
+       MSB4018: System.IO.IOException: ... 'publish\portable.exe' is being used
+4. Limpiar procesos huérfanos antes de arrancar o publicar:
+       Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
+5. Verificación obligatoria antes de dar por terminada una tarea:
+       publish\portable.exe doctor      → debe dar "Resultado: OK"
+       publish\portable.exe listar      → debe listar el .gguf
+       publish\portable.exe preguntar "hola" --max-tokens 32   → respuesta limpia
+6. publish\, bin\, obj\, logs\ están en .gitignore: el portable NO se sube al
+   repo, se actualiza local. Lo que sube al repo es el código fuente.
+7. No hay una segunda copia que sincronizar. Se trabaja en
+   ia_terminal\ y ya está (ver PARTE 2).
+
+################################################################################
+# PARTE 2 — EL AGENTE DE CÓDIGO ES OPENCODE, Y HAY UNA SOLA COPIA
+################################################################################
+
+QUIÉN PROGRAMA ESTO
+  El agente de código es **opencode**. Esta bitácora es una de sus reglas, y
+  AGENTS.md (dentro del repo) es la otra. Cuando opencode —o cualquier otro
+  agente que se agregue después— toca este proyecto, tiene que leer las dos.
+
+  Para opencode, en concreto:
+    · Configuración y skills:  C:\Users\nicot\.config\opencode\
+    · Carpeta de trabajo:      C:\Users\nicot\OneDrive\Desktop\IA 27 T\
+    · El proyecto es ia_terminal\, y ahí está el .git.
+    · Las dos reglas de este proyecto son AGENTS.md y este archivo. Los dos
+      están en la raíz del repo, así que se leen juntos al empezar.
+
+LA REGLA DE UNA SOLA COPIA
+  Todo vive en C:\Users\nicot\OneDrive\Desktop\IA 27 T\:
+
+      ia_terminal\          código + .git + AGENTS.md + esta bitácora
+      ia_terminal\publish\  el portable recién hecho
+      runtime\              llama-server.exe + DLLs
+      modelos\              el .gguf
+      portable 0.2.exe      entrega congelada
+      config.json           configuración de la entrega
+      logs\                 logs de sesión
+
+  No hay copia en un pendrive, no hay copia en otra carpeta, no hay "la otra
+  versión". Antes había dos y eran casi siempre distintas, y cada vez que se
+  tocaba una había que acordarse de la otra. Eso terminó. Si aparece una
+  segunda copia, es un error: borrarla o convertirla en la única.
+
+  *** UNA COPIA NO ES UN RESPALDO. *** Con una sola carpeta, el respaldo es el
+  repo (git). Por eso todo lo que importa está versionado AHORA: el código, el
+  .ico, AGENTS.md y esta bitácora. Lo que NO entra al repo, y hay que
+  controlar a mano:
+    · modelos\*.gguf (4,36 GB)       → demasiado grande para el repo; es un
+                                        archivo, se respaldan sus 4,36 GB o se
+                                        vuelve a descargar
+    · runtime\ (44,86 MB)            → se regenera con el llama.cpp build
+    · portable 0.2.exe               → se regenera con dotnet publish
+  O sea: de todo lo que hay en la carpeta, lo ÚNICO que de verdad no se puede
+  regenerar es el modelo, y lo único que no se puede regenerar rápido es el
+  .gguf. Por eso el hash del modelo está anotado en la PARTE 7.
+
+EL REPO
+      git -C "C:\Users\nicot\OneDrive\Desktop\IA 27 T\ia_terminal" remote -v
+      → origin  https://github.com/Estalingradocorp/IA27Terminal-.git
+  Ojo con la URL: sin el ".git" del final NO es clonable. Ya se corrigió una
+  vez por escribirla de memoria.
+
+  ESTADO DEL REPO — estaba en este momento antes del commit del 27/9 04:55:
+      2 commits (5b86959, 6b0d32c) y encima SIN COMMITEAR:
+        modificados: AGENTS.md · AppConfig.cs · IaTerminal.csproj ·
+                    LlamaServerSession.cs · Program.cs · README.md ·
+                    TerminalApplication.cs
+        nuevos    : ChildProcessJob.cs · icono.ico
+        borrados  : Capturas\*.png (2) · Historial de Chats\*.txt (1)
+      ChildProcessJob.cs era el fix de la PARTE 19 (el de los 7 GB de
+      huérfanos) y estaba SOLO en el disco. Ya se subió.
+
+      Y los 3 "borrados" NO estaban perdidos: estaban en el commit 6b0d32c y se
+      recuperaron con
+          git -C "C:\...\ia_terminal" restore "Capturas" "Historial de Chats"
+      Que se hayan borrado de la copia de trabajo NO significa que se hayan
+      borrado del repo. Ver P15 punto 24.
+
+  *** NO HACER `git add -A` A CIEGAS. *** Si el estado tiene "D" y hacés
+  add -A, commiteás el borrado de las capturas y del historial. Mirá qué
+  letra aparece en cada línea antes de commitear. Pasó: los 3 "D" tardaron
+  un restore. Si se llega a commitear, se pierden para siempre.
+
+################################################################################
+# PARTE 2 (bis) — ARQUITECTURA DEL PROYECTO
+################################################################################
+
+Archivos fuente, en C:\Users\nicot\OneDrive\Desktop\IA 27 T\ia_terminal\:
+
+  IaTerminal.csproj       proyecto .NET 8, self-contained win-x64
+  icono.ico              icono multirresolución del portable (PARTE 18)
+  ChildProcessJob.cs     Job Object de Windows (PARTE 19) — SIN COMMITEAR
+  Program.cs              punto de entrada + tema de consola Cyberpunk
+                          + ApplyWindowIcon (icono de la ventana de consola)
+  AppConfig.cs            configuración persistente + resolución portable
+  ModelCatalog.cs         escaneo de archivos .gguf
+  GgufMetadataReader.cs   lector de metadatos GGUF
+  LlamaServerSession.cs   servidor local + streaming SSE + políticas del prompt
+  TerminalApplication.cs  loop del agente, comandos /, web, herramientas, harness
+  ModelRegistry.cs        catálogo de modelos descargables (HF)
+  AGENTS.md               reglas permanentes para cualquier agente de código
+  README.md               documentación de usuario
+
+Tamaños y fechas (única copia, 27/9):
+  TerminalApplication.cs  110.206 b  03:17:39   ← el más grande, el loop
+  LlamaServerSession.cs    26.703 b  03:13:00
+  ChildProcessJob.cs        4.745 b  03:12:40
+  AGENTS.md                 7.655 b  02:24:34
+  icono.ico               372.526 b  02:20:15
+
+Flujo de una pregunta:
+  usuario → TerminalApplication → LlamaServerSession → llama-server.exe
+         ← tokens en streaming (SSE) → impresión con buffer anti-fugas
+         → detección de marcadores → herramienta → resultado → nueva pregunta
+
+################################################################################
+# PARTE 3 — EL MÉTODO "MARCADOR + INTERCEPCIÓN"
+################################################################################
+
+Este es el patrón central del proyecto. Todo lo nuevo que se agregue al agente
+debe seguirlo.
+
+Principio: un modelo de 7B NO es agentic de forma nativa. No lo fuerces con
+prompts lógicos: dale un PROTOCOLO MECÁNICO que el host ejecute y verifique.
+
+1) El modelo emite un MARCADOR al inicio de su mensaje:
+       [[NET]] consulta            → buscar en internet
+       [[READ]] ruta               → leer archivo o listar carpeta
+       [[CMD]] comando             → ejecutar PowerShell
+       [[WRITE]] ruta :: cuerpo    → crear/reemplazar archivo
+       [[WRITE]] ruta :: cuerpo [[END]]   (el [[END]] es OBLIGATORIO)
+       [[DONE]]                    → fin de tarea (modo harness)
+2) El sistema NO confía: lo detecta, lo valida, lo ejecuta bajo permisos.
+3) El resultado real se inyecta como mensaje [SISTEMA · ...].
+4) Se re-pregunta al modelo con ese resultado (AskContinueAsync).
+5) Se detectan MENTIRAS: afirmaciones sin marcador → se descartan y se reintenta.
+
+Variantes del método que resultaron protecciones efectivas:
+   - Intercepción de negativas      → si dice "no puedo navegar", se busca igual.
+   - Detección de alucinación       → si dice "he creado el archivo" sin [[WRITE]],
+                                      es mentira: se descarta y se fuerza reintento.
+   - Marcador malformado           → [[WRITE]] sin [[END]] NO escribe nada.
+   - BUFFER ANTI-FUGAS             → la cola del stream se retiene desde el
+                                      último '[' para que ningún marcador, ni
+                                      siquiera un fragmento, llegue a la pantalla.
+
+################################################################################
+# PARTE 4 — HERRAMIENTAS DEL AGENTE
+################################################################################
+
+  [[READ]] ruta
+      Lee archivo (máx. 4000 caracteres) o lista carpeta (máx. 150 entradas).
+      Libre dentro del área de trabajo; FUERA de ella pide permiso (s/n).
+
+  [[CMD]] comando
+      Ejecuta PowerShell con -NoProfile -NonInteractive, cwd = carpeta actual,
+      timeout 30 s, salida truncada a 2000 caracteres.
+      SIEMPRE pide confirmación (s/n). Nunca autorización automática de sesión.
+      Patrones destructivos → advertencia ROJA extra:
+        Remove-Item -Recurse -Force, rm -rf, del /s, rd /s, format, diskpart,
+        bcdedit, shutdown, restart-computer, stop-computer, reg delete,
+        takeown, icacls /reset, clear-disk, initialize-disk,
+        set-executionpolicy unrestricted
+
+  [[WRITE]] ruta :: contenido [[END]]
+      Crea o reemplaza archivo (UTF-8 sin BOM). Crea carpetas faltantes.
+      SIEMPRE pide confirmación con VISTA PREVIA del contenido.
+      Idempotencia: misma ruta + mismo turno → se bloquea el duplicado.
+
+  [[NET]] consulta
+      Busca en DuckDuckGo HTML y, si falla, en Wikipedia (es).
+      Autorización por sesión (NetAutoAllowed) o pregunta individual.
+
+Límites: 5 herramientas encadenadas por turno · 2 rondas de [[NET]] ·
+2 reintentos anti-alucinación.
+
+  *** NO PROBAR LAS HERRAMIENTAS ESCRIBIENDO EN LA RAÍZ. *** La raíz de
+  "IA 27 T" es lo que ve el usuario. Ya quedaron dos basura de prueba ahí
+  (.ia27-write-test-6904.tmp y publish\prueba.txt). Usar una subcarpeta de
+  pruebas y borrarla después.
+
+################################################################################
+# PARTE 5 — MODO HARNESS (bucle agéntico autónomo)
+################################################################################
+
+Comando: /harness <objetivo>   (alias: /agente)
+
+El agente trabaja solo por pasos:
+  1. Plan numerado (solo al inicio o si cambia).
+  2. UNA herramienta por paso.
+  3. Verifica el resultado real recibido del sistema antes del siguiente paso.
+  4. Termina solo con [[DONE]] + resumen.
+
+Salvaguardas: límite de 15 pasos (HarnessMaxSteps) · marcadores malformados no
+ejecutan nada · permisos s/n intactos · Ctrl+C aborta en cualquier momento.
+
+################################################################################
+# PARTE 6 — CONFIGURACIÓN Y MODELO
+################################################################################
+
+Layout:
+  IA 27 T\
+    ia_terminal\publish\portable.exe   ← terminal
+    ia_terminal\publish\runtime\       ← llama-server.exe + DLLs
+    ia_terminal\publish\config.json    ← config del portable de desarrollo
+    portable 0.2.exe                   ← entrega
+    runtime\                           ← runtime de la entrega
+    config.json                        ← config de la entrega
+    modelos\                           ← el .gguf
+    ..\logs\                           ← logs de sesión
+
+  El .gguf va en modelos\, DENTRO de la carpeta del proyecto pero FUERA de
+  ia_terminal\, para que git no lo vea (4,36 GB no entran en un repo) y para que
+  el modelo esté a la vista. No va dentro de publish\.
+
+HAY DOS config.json, UNO POR COPIA DEL PORTABLE
+  Cada ejecutable usa AppContext.BaseDirectory\config.json, o sea el que tiene
+  AL LADO. Hay dos ejecutables y por lo tanto dos configs:
+
+    IA 27 T\config.json                       ← entrega v0.2
+    IA 27 T\ia_terminal\publish\config.json   ← portable de desarrollo
+
+  Los dos están alineados (reverificado 27/9 04:40):
+    modelo = C:\Users\nicot\OneDrive\Desktop\IA 27 T\modelos
+    ctx 8192 · threads 8 · max-tokens 1536 · timeout 300 s
+    gpu-layers 0 · temp 0.7 · rp 1.1 · top-p 0.9 · chatml · cache f16/f16
+
+  Cambiar uno NO cambia el otro. Si tocás uno, revisá el otro.
+
+Reglas implementadas en el código:
+  - AppConfig.GetDefaultConfigPath() usa AppContext.BaseDirectory\config.json
+    (portable) y SOLO cae a %APPDATA%\IA27Terminal si la carpeta no es escribible.
+  - ResolveModelDirectory() ordena:
+        1) publish\models\   (solo si contiene algún .gguf)
+        2) ruta configurada  (si existe)
+        3) búsqueda de Modelo / models / Modelos hasta 3 niveles arriba del exe
+        4) ruta configurada o la por defecto
+  - Save() respeta la ruta de modelos que el usuario fija explícitamente
+    (no la pisa la resolución automática). Esto estaba roto y se corrigió.
+
+  Para cambiar la ruta del modelo hay que usar el propio portable, no editar a
+  mano, porque Save() tiene su propia lógica:
+
+      & ".\portable 0.2.exe" config set model-dir "C:\...\IA 27 T\modelos"
+      & ".\ia_terminal\publish\portable.exe" config set model-dir "..."
+
+  Comandos de configuración:
+    portable.exe config show
+    portable.exe config set model-dir "…\IA 27 T\modelos"
+    portable.exe config set model Atenea-Omega-IB2.gguf
+    portable.exe config set threads 8
+    portable.exe config set context 8192
+    portable.exe config set max-tokens 1536
+    portable.exe config set timeout 300
+
+  Para ver los dos configs de un saque:
+
+    Get-ChildItem "C:\Users\nicot\OneDrive\Desktop\IA 27 T" -Recurse `
+      -Filter config.json -Depth 2 |
+      ForEach-Object { $j = Get-Content $_.FullName -Raw | ConvertFrom-Json
+        "{0}  {1}  {2}/{3}/{4}/{5}" -f $_.Directory.Name, $j.ModelDirectory,
+          $j.ContextSize, $j.Threads, $j.MaxTokens, $j.StartupTimeoutSeconds }
+
+################################################################################
+# PARTE 7 — EL ERROR DEL MODELO CORRUPTO (lección clave)
+################################################################################
+
+SÍNTOMA: el modelo respondía basura sin dar ningún error:
+    0C(G&&5B<#F06E*E1GD+&G246,>.:7D**4:A$07%<-*6#E&:HB,E,=7*1%-7@%=<
+
+CAUSA: una copia del .gguf DAÑADA. Mismo tamaño (4.683.074.240 bytes) pero
+distinto hash. Copia interrumpida o transferencia defectuosa. Pasó al copiar
+el modelo de una máquina a otra.
+
+COMO SE DETECTA:
+  1) Hash contra el original:
+       Get-FileHash "…\IA 27 T\modelos\Atenea-Omega-IB2.gguf"
+     (resultado sano:
+      65B8FCD92AF6B4FEFA935C625D1AC27EA29DCB6EE14589C55A8F115CEAAA1423)
+  2) Prueba directa del runtime, sin la app:
+       runtime\llama-cli.exe -m <modelo> -p "hola" -n 32
+     Si sale basura → el archivo está corrupto, no es un problema de código.
+
+REGLAS:
+  - Después de copiar un .gguf, VERIFICAR EL HASH. "Estar ahí" no es
+    "estar bien".
+  - Ante basura sin error: sospechar del archivo antes que del código.
+  - NO TENER DOS COPIAS DEL .gguf. El bug original fue una copia que se
+    corrompió. Cada copia extra son 4,36 GB que pueden divergir sin que nadie
+    se entere, y el agente puede arrancar con la mala. Una sola, en modelos\,
+    con su hash anotado acá.
+
+  Hubo un caso real: un .gguf corrupto de 4.683.074.240 bytes (idéntico tamaño,
+  hash A1F990B7…5F40D7639, distinto del sano) que se borró para liberar 4,36 GB.
+  Antes de borrarlo se verificó el hash del que se iba a borrar Y del que se
+  quedaba. Aplicar SIEMPRE ese orden: confirmar ambos, después borrar.
+
+  PENDIENTE: hay un duplicado del modelo sano todavía en
+  C:\Users\nicot\OneDrive\Documentos\modelos IA\models\Atenea-Omega-IB2.gguf,
+  mismo hash. Ver P16 punto 2: borrarlo.
+
+################################################################################
+# PARTE 8 — PROBLEMA DEL ARRANQUE LENTO / FALLO DE CARGA
+################################################################################
+
+SÍNTOMA: "El modelo no estuvo listo en 300 s" aunque el modelo está sano.
+
+CAUSAS ENCONTRADAS:
+  1) Procesos llama-server huérfanos de sesiones anteriores (uno llegó a usar
+     3,5 GB de RAM y a "colgarse" como proceso). Ocupaban memoria y el archivo
+     del modelo.
+  2) Publicar o ejecutar mientras otro portable.exe está abierto.
+
+SOLUCIÓN:
+  Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
+  Get-Process portable   -ErrorAction SilentlyContinue | Stop-Process -Force
+
+DATO ÚTIL: con 8 hilos y modelo local, /health responde en ~15 s y la carga
+completa tarda ~60 s. Si tarda más de 300 s, casi siempre hay un proceso
+huérfano o un archivo de modelo tomado.
+
+*** CORRECCIÓN 2026-09-27 03:20: LA CAUSA RAÍZ NO ERA "A VECES SUCEDE", ERA UN
+    BUG. *** Resuelto en la PARTE 19. Ahí está el detalle y la prueba.
+
+  Arranque en frío: la PRIMERA corrida de un portable recién escrito tarda
+  mucho más (148 s medidos: hay que leer 68 MB de single-file + escaneo de AV).
+  La segunda fue 48,4 s. Si es la primera vez, esperar.
+
+################################################################################
+# PARTE 9 — PROBLEMAS CONOCIDOS DE LLAMA.CPP (no regresar)
+################################################################################
+
+1) --cache-type-k/v q4_0 CORROMPE tokens en algunos GGUF.
+   Síntoma: "Hola!ola!", "P P P P", mezcla de tokens ("AtPI", "PPIA").
+   SOLUCIÓN: f16/f16 (ya es el valor por defecto en AppConfig).
+
+2) Forzar --chat-template chatml. El template Jinja embebido en algunos GGUF
+   falla con este build de llama.cpp.
+
+3) El streaming debe imprimirse token a token. Esperar la respuesta completa
+   con max_tokens=2048 a ~5 tok/s son minutos de espera aparente.
+
+4) Detector de degeneración: si la cola repite un carácter dominante
+   ("P P P P", "777777") se trunca y se reintenta con parámetros distintos.
+
+5) Modelos de 7B: no son "agentic" nativos. Hay que forzar el protocolo con
+   marcadores + interceptación, no confiar en que vayan a "obedecer" las
+   instrucciones del system prompt.
+
+6) Warning de metadatos del .gguf (aparente en cada arranque, INOCUO):
+       control-looking token: 128247 '</s>' was not control-type;
+       this is probably a bug in the model. its type will be overridden
+   Es un problema del .gguf (el token </s> está declarado con el tipo
+   equivocado), no del código ni del runtime: el modelo carga y responde bien
+   después. No tocar nada por esto. Se anota porque hace ruido.
+
+################################################################################
+# PARTE 10 — ANTI-ALUCINACIÓN (todas las trampas instaladas)
+################################################################################
+
+El 7B miente de dos formas distintas. Ambas están frenadas:
+
+A) AFIRMA QUE HIZO UNA ACCIÓN SIN HACERLA
+   - WriteClaimPattern / CmdClaimPattern detectan "he creado el archivo",
+     "archivo creado en", "ejecuté el comando", "quedó guardado"...
+   - Si en ese turno no se ejecutó esa herramienta → se descarta la respuesta
+     falsa, se imprime [INTERCEPCIÓN] y se le ordena reemitir con marcador.
+   - Máximo 2 reintentos; luego se lo dice al usuario (claro).
+
+B) USA RUTAS INVENTADAS
+   - BuildEnvironmentInfo inyecta en el system prompt las rutas REALES: usuario
+     de Windows, carpeta de trabajo, Documentos, Escritorio, Descargas, fecha.
+   - PlaceholderPathPattern bloquea cualquier ruta con "TuNombreDeUsuario",
+     "Usuario", "%USERNAME%", "YourName" → no ejecuta nada y se le devuelven
+     las rutas reales para reemisión.
+   - Alias "documentos / escritorio / desktop / descargas / downloads" se
+     resuelven a las carpetas reales del sistema.
+   - lastToolPath: la sesión recuerda la última ruta usada, para que
+     "en esa carpeta" o "con el título mejoras" se resuelvan solos.
+
+C) MARCADOR MALFORMADO
+   - [[WRITE]] sin [[END]] → no se escribe nada → reintento forzado.
+   - El cierre [[END]] también evita que el texto de la respuesta del modelo
+     ("¿Necesitas algo más?") termine DENTRO del archivo escrito.
+
+################################################################################
+# PARTE 11 — COMANDOS DEL AGENTE
+################################################################################
+
+  /help                    ayuda (incluye herramientas y harness)
+  /harness <objetivo>      modo agéntico por pasos (alias: /agente)
+  /clear                   limpia el historial
+  /history                 muestra el historial de la sesión
+  /system [texto]          consulta o cambia la instrucción de sistema
+  /modelos                 lista y cambia de modelo
+  /cambiar                 acceso directo al selector de modelos
+  /use <selector>          cambia de modelo
+  /descargar               descarga un modelo nuevo
+  /temp [valor]            temperatura
+  /rp [valor]              penalización por repetición
+  /topp [valor]            top-p
+  /tokens [valor]          tokens máximos por respuesta
+  /net [on|off]            activa o desactiva la búsqueda
+  /exit                    sale de la sesión
+
+Comandos de línea de comandos:
+  portable.exe                    sesión interactiva
+  portable.exe listar             lista los modelos GGUF
+  portable.exe info [n]           datos del modelo
+  portable.exe preguntar "<msg>"  consulta única
+  portable.exe doctor             diagnóstico (modelo, runtime, hardware)
+  portable.exe descargar          descarga modelos
+  portable.exe config show|set    configuración
+  portable.exe help               ayuda
+
+  OJO: el mutex de instancia única (P19) bloquea los comandos que cargan el
+  modelo (preguntar, agente, serve, doctor, sesión interactiva) cuando ya hay
+  otra sesión viva: se rechaza con exit 2. Los que NO cargan modelo (listar,
+  info, config, help, version, descargar) funcionan siempre, y son justamente
+  los que sirven para diagnosticar cuando algo está colgado.
+
+################################################################################
+# PARTE 12 — CONFIGURACIÓN ÓPTIMA PARA ESTA MÁQUINA
+################################################################################
+
+  threads           : 8      (8 núcleos lógicos, i3-10100F)
+  context           : 8192
+  max-tokens        : 1536
+  gpu-layers        : 0      (OBLIGATORIO con este runtime, ver abajo)
+  temperature       : 0.7
+  repeat-penalty    : 1.1
+  top-p             : 0.9
+  chat-template     : chatml
+  cache-type-k/v    : f16 / f16   ← NO cambiar a q4_0
+  net               : on
+  timeout           : 300 s
+  RAM del equipo    : 15,9 GB
+  GPU presente      : NVIDIA GeForce GTX 1050 Ti, 4 GB VRAM
+
+*** SÍ HAY GPU, PERO NO SIRVE. ***
+La placa tiene una GTX 1050 Ti. El problema NO es la máquina, es el RUNTIME,
+que es una build solo-CPU:
+
+    Get-ChildItem runtime\ -Filter "ggml-*" | Select-Object Name
+    → solo ggml-cpu-*.dll   (alderlake, cannonlake, cascadelake, cooperlake,
+                             haswell, icelake, ivybridge, piledriver,
+                             sandybridge, sapphirerapids, skylakex, sse42, x64,
+                             zen4) + ggml-base.dll + ggml-rpc
+    → NO hay ggml-cuda.dll  → no hay soporte CUDA  → gpu-layers siempre 0
+
+Conclusión: subir gpu-layers a 20-40 con ESTE runtime no hace nada (y puede
+confundir el arranque). Para usar la GTX 1050 Ti habría que reemplazar la
+carpeta runtime\ por una build CUDA de llama.cpp. Y aunque se hiciera, ojo con
+el margen: el modelo Q4_K_M ocupa 4,36 GB y la VRAM es de 4 GB, así que el
+modelo no entra entero. Solo se podría descargar una capa parcial + el KV
+cache, con una ganancia dudosa frente al ruido. Medir antes de REEMPLAZAR el
+runtime que hoy funciona.
+
+Nota de microarquitectura: el i3-10100F es Comet Lake. En la lista de arriba no
+está explícito; la build resuelve por la más cercana (cooperlake). No es un
+problema a tocar.
+
+VELOCIDAD REAL MEDIDA (27/9 04:02, del log de sesión)
+  prompt eval : 22,06 · 20,72 · 21,55 tok/s
+  generación  :  5,06 ·  5,23 ·  4,71 tok/s
+  O sea ~21 tok/s de entrada y ~5 tok/s de salida. Un turno de 30 tokens tarda
+  ~6 s; uno de 250 tokens, ~43 s. Y el PROMPT pesa: una tarea evaluó 950 tokens
+  y se llevó 43 s, más que la generación entera. Con el historial creciendo, el
+  prompt se come el tiempo: para eso están /clear y bajar el ctx. Bajar a 4096
+  daría ~30% más de generación, y no compensa perder contexto en un agente.
+
+################################################################################
+# PARTE 13 — IDENTIDAD DEL AGENTE
+################################################################################
+
+  Nombre        : Atenea Omega Beta (IA-27)
+  Alias archivo : Atenea-Omega-IB2.gguf
+  Base          : Qwen2.5-7B-Instruct, cuantización Q4_K_M
+  Contexto      : 32.768 tokens nativo (usando 8192 en configuración)
+  System prompt : "Eres Atenea Omega Beta (IA-27), un agente de inteligencia
+                  artificial local. Responde en español, con precisión y de
+                  forma práctica. No afirmes haber ejecutado acciones externas
+                  que no se hayan proporcionado. Puedes ayudar a redactar,
+                  programar, analizar y organizar tareas."
+
+Personalidad de interfaz (fijada en el código):
+  - Español rioplatense, conciso y práctico.
+  - Estética Cyberpunk: negro, cian, azul oscuro; prompts "tú>" e "IA27>".
+  - Mensajes de sistema entre corchetes: [SISTEMA · ...], [herramienta: ...].
+
+  OJO, no confundir: Atenea Omega Beta (IA-27) es el AGENTE que corre dentro
+  del portable, en C#, sobre el modelo. opencode (P2) es el agente de CÓDIGO,
+  que programa este proyecto. Son dos cosas distintas y no se mezclan.
+
+################################################################################
+# PARTE 14 — REGLAS PARA AGENTES DE CÓDIGO (AGENTS.md)
+################################################################################
+
+Estas reglas están escritas en AGENTS.md dentro del repo, y deben respetarse
+en cualquier sesión de desarrollo. opencode las sigue (ver PARTE 2):
+
+  1. Tras CUALQUIER cambio de código: build + publish (Parte 1). Sin excusas.
+  2. No revertir los flags de llama.cpp que previenen corrupción (f16, chatml).
+  3. No quitar las trampas anti-alucinación ni el filtro de placeholders.
+  4. Toda herramienta nueva debe seguir el patrón marcador + intercepción.
+  5. Los permisos de [[CMD]] y [[WRITE]] se piden SIEMPRE, nunca automáticos.
+  6. Verificar el hash de cualquier .gguf copiado antes de confiar en él.
+  7. Probar los regex nuevos en PowerShell antes de compilar (mismo motor .NET).
+  8. El búfer anti-fugas debe seguir pasándose por StripToolMarkers.
+  9. Cerrar portable.exe antes de publicar; limpiar llama-server huérfanos.
+ 10. Documentar en README/AGENTS.md todo comportamiento nuevo o trampa
+     encontrada, y en esta bitácora.
+ 11. doctor OK NO alcanza para dar por buena una entrega: hay que mirar DE
+     DÓNDE sacó el runtime y el modelo (ver la trampa de la PARTE 17).
+ 12. Si se toca el icono: verificar con diff de píxeles contra el JPG, no
+     confiar en que "el .ico existe" (ver la PARTE 18).
+ 13. Una sola copia del código y una sola del modelo. No crear una segunda.
+ 14. Al tocar config: cambiar con `config set` y revisar los DOS config.json.
+
+################################################################################
+# PARTE 15 — HISTORIAL DE INCIDENTES RESUELTOS
+################################################################################
+
+ 1. Respuestas corruptas ("Soy soy, un At IA-27es...")   → cache q4_0 → f16.
+ 2. 5 minutos sin ver respuesta                          → faltaba streaming SSE.
+ 3. "No puedo navegar por internet"                      → intercepción de negativas
+                                                           + [[NET]] forzado.
+ 4. Fuga de texto de la política del prompt a pantalla   → buffer anti-fugas.
+ 5. Marcador [[NET]] no detectado porque se imprimía     → detección al final del
+                                                           stream, no durante.
+ 6. No obediencia de [[NET]] en consultas del usuario   → intención explícita
+                                                           ("busca X") resuelta
+                                                           antes de consultar al modelo.
+ 7. Alucinación de creación de archivos                  → [[END]] + WriteClaimPattern.
+ 8. Texto del asistente dentro del archivo escrito        → captura hasta [[END]].
+ 9. Ruta inventada "C:\Users\TuNombreDeUsuario"          → grounding de entorno +
+                                                           PlaceholderPathPattern.
+ 10. Doble escritura del mismo archivo                   → idempotencia por turno.
+ 11. Doble permiso por escritura duplicada               → bloqueo antes de preguntar.
+ 12. Basura de tokens: un .gguf corrupto                 → hash. Ver PARTE 7.
+ 13. "El modelo no estuvo listo en 300 s"                → llama-server huérfano.
+ 14. config set model-dir se sobrescribía solo           → Save() respeta lo explícito.
+ 15. publish falla si el portable está corriendo         → cerrar antes de publicar.
+ 16. El .ico con biSize corrido (cabecera corrida 4 b)   → System.Drawing.Icon
+                                                            lo rechazaba y el
+                                                            Explorador no ponía
+                                                            icono, sin error.
+                                                            biSize va PRIMERO,
+                                                            offset 0. Ver P18.
+ 17. "Portable" sin runtime propio arrancaba igual       → resolvía a una ruta de
+                                                            C: y tomaba llama-server
+                                                            de una carpeta vieja de
+                                                            entrenamiento. doctor OK,
+                                                            no portable. Copiar
+                                                            runtime\ al lado. Ver P17.
+ 18. Fuentes desincronizadas entre dos carpetas          → el repo tenía el
+                                                            portable viejo (sin
+                                                            icono) publicado.
+                                                            Publicar en las dos.
+                                                            YA NO APLICA: hay una
+                                                            sola copia (P2).
+ 19. PARTE 12 decía "sin GPU" y hay una GTX 1050 Ti     → el runtime es build
+                                                            solo-CPU: no hay
+                                                            ggml-cuda.dll. Ver P12.
+ 20. "El modelo no carga" / 10 minutos colgado          → la máquina se quedó
+     en "Cargando el modelo"                                sin RAM: 4 llama-server
+                                                            huérfanos × ~7 GB. La
+                                                            ventana era teatro
+                                                            (el portable ya había
+                                                            muerto). Causa: el
+                                                            Kill() del DisposeAsync
+                                                            solo corre si el
+                                                            proceso desenrolla el
+                                                            await using. Arreglado
+                                                            con Job Object + mutex.
+                                                            Ver PARTE 19.
+ 21. Todos los logs de logs\ pesaban 0 bytes            → --log-disable apagaba el
+                                                            log de llama-server.
+                                                            Quitado. Al volver a
+                                                            escribirse apareció un
+                                                            aviso de CORS sin
+                                                            clave (ver PARTE 20).
+ 22. Una carpeta de trabajo desapareció sin dejar rastro  → NO fue culpa de nadie:
+     (no estaba en la papelera, OneDrive no corría)        se vació sola. Se
+                                                            reconstruyó desde la
+                                                            otra copia. Por eso
+                                                            ahora hay UNA sola
+                                                            carpeta y el repo es
+                                                            el respaldo (P2).
+ 23. Arranque en frío de 148 s tras republicar           → la primera corrida de un
+     "Cargando el modelo"                                  portable recién escrito
+                                                           tarda mucho más. La
+                                                           segunda fue 48,4 s. No
+                                                           confundir con la P8.
+ 24. Archivos que el repo conoce, ausentes de la copia   → git status con "D". No
+     de trabajo (Capturas\, Historial de Chats\)              están perdidos: están
+                                                            en el commit 6b0d32c y
+                                                            se recuperan con
+                                                            git restore. Lo que NO
+                                                            se recupera es si se
+                                                            commitea el borrado.
+ 25. Archivos basura de las pruebas de [[WRITE]]          → .ia27-write-test-6904.tmp
+     en la raíz de la entrega                              (2 bytes) y
+                                                            publish\prueba.txt
+                                                            (0 bytes). Salieron de
+                                                            pruebas manuales de la
+                                                            herramienta WRITE. La
+                                                            raíz es lo que ve el
+                                                            usuario: no probar
+                                                            escrituras ahí. Ver P4.
+ 26. Quedó código de la versión de Python                  → atenea.py y varios .md
+     anterior a la de C#/.NET                               de la versión Python, en
+                                                            la carpeta del modelo, y
+                                                            carpetas __pycache__.
+                                                            El proyecto es .NET 8
+                                                            desde que se reescribió.
+                                                            No ejecutar atenea.py
+                                                            pensando que es el
+                                                            agente actual.
+ 27. Los 2 config.json apuntaban a un disco que    → al desconectar la unidad
+     ya no existe                                externa, `listar` no encontraba
+                                                   el modelo. Ojo: un config que
+                                                   apunta a una unidad que no
+                                                   está NO se detecta solo, y
+                                                   el error aparece tarde, cuando
+                                                   alguien usa el portable. Hay
+                                                   que revisarlo cada vez que
+                                                   cambie la topología de discos.
+ 28. El .gguf sano quedó duplicado en dos carpetas → modelos\ y la ruta vieja
+                                                   siguen con el mismo hash.
+                                                   4,36 GB de más y el riesgo de
+                                                   la P7. Ver P16 punto 2.
+
+################################################################################
+# PARTE 16 — PRÓXIMOS PASOS SUGERIDOS (27/9 04:45)
+################################################################################
+
+PRIORIDAD ALTA:
+
+  1. ~~Subir al repo lo que quedó sin commitear~~ HECHO 27/9 04:55. Se
+     commitearon los 7 modificados, ChildProcessJob.cs (el fix de la P19), el
+     icono.ico, los 3 archivos recuperados con git restore (Capturas\ ×2,
+     Historial de Chats\ ×1) y esta bitácora, que entró al repo. Lo único que
+     quedó fuera es publish\, que está en .gitignore. Ver P2.
+  2. Borrar el .gguf duplicado:
+         C:\Users\nicot\OneDrive\Documentos\modelos IA\models\Atenea-Omega-IB2.gguf
+     Verificar primero el hash de los dos (P7: el sano es
+     65B8FCD9…AA1423), borrar el de la ruta vieja, y después vaciar la carpeta.
+  3. Decidir lo del CORS + sin API key del llama-server (PARTE 20). Es la
+     decisión de seguridad abierta más importante que queda, y aparece en el
+     log de cada arranque.
+
+LO QUE SIGUE PENDIENTE:
+
+  4. Probar el modelo con /harness <objetivo> de verdad y ver cuántos pasos
+     necesita para tareas reales.
+  5. Probar gpu-layers > 0. NO tiene sentido con este runtime: ver P12.
+  6. Memoria persistente entre sesiones (/recuerda) — era la Fase 2 del plan
+     original y sigue pendiente.
+  7. Métricas: /stats con tokens/seg, tiempo por turno y uso de herramientas.
+     Los números ya están medidos (P12): ~21 tok/s de prompt, ~5 de generación.
+     Falta exponerlos al usuario.
+  8. Considerar un modelo de herramientas más grande (14B) para reducir la
+     dependencia de las trampas. Con 5 tok/s de generación va a ser más lento
+     todavía: medir antes de decidir.
+  9. Decidir si vale la pena una build CUDA de llama.cpp para la GTX 1050 Ti.
+     Antes de cambiar nada: el modelo son 4,36 GB y la VRAM 4 GB, así que la
+     ganancia es dudosa. Medir con runtime\llama-bench.exe y no a ciegas (P12).
+ 10. Congelar una v0.3 cuando haya cambios REALES de código, no al republicar:
+     la v0.2 tiene el mismo hash que el publish, así que hoy congelar otra vez
+     no aporta nada (P17).
+  11. Limpiar la raíz: quedan __pycache__ y, en la carpeta modelos/, atenea.py y
+     los .md de la versión Python (P15 punto 26). Y ojo con esto: la carpeta
+     modelos\ está dentro de OneDrive, así que OneDrive va a querer subir
+     4,36 GB del .gguf a la nube. Si eso no es lo que querés, mover el modelo
+     fuera de la carpeta sincronizada y actualizar el config set model-dir.
+
+################################################################################
+# PARTE 17 — ENTREGAS CONGELADAS POR VERSIÓN
+################################################################################
+
+Se copia el portable ya publicado a la raíz de la carpeta con nombre
+versionado. Es una COPIA CONGELADA: no se regenera, no se publica encima.
+Sirve para poder volver a una versión conocida que ya se probó buena.
+
+  v0.1  →  (ya no está en la máquina; se fue con el pendrive)
+           68.768.802 bytes · 2026-09-27 02:23
+           SHA-256 A104BA71911CF18880E35071E65B717B78EAEE64A2734FA32A11707F953C29C4
+           Montada y verificada el 2026-09-27 02:34.
+           *** LA ÚNICA SIN LOS FIXES DE LA PARTE 19. *** Tenía el bug del
+           huérfano: si se colgaba en "Cargando el modelo", era por eso.
+           El hash queda anotado para poder saber si alguien tiene un .exe con
+           ese contenido. Si hace falta volver a esa versión, hay que
+           reconstruirla desde el commit 6b0d32c, que es el código anterior al
+           fix de la P19.
+
+  v0.2  →  IA 27 T\portable 0.2.exe   ← ACTUAL
+           68.772.898 bytes · 2026-09-27 03:34
+           SHA-256 437F0212D68A331C28A29CB6F3835FC331D3FE8C8F6E27A80405245E27D044F5
+           Montada y verificada el 2026-09-27 03:45.
+           REVERIFICADA el 27/9 04:25 y de nuevo a las 04:40 tras cambiar la
+           carpeta del modelo:
+             · listar → exit 0, encuentra Atenea-Omega-IB2.gguf 4.36 GB en
+               IA 27 T\modelos\
+             · config propio → 8192 / 8 / 1536 / 300 s (idéntico al del publish)
+             · runtime\ al lado: 51 archivos, 44,86 MB, sin ggml-cuda (P12)
+             · el hash coincide con el publish\portable.exe, o sea que LA v0.2
+               ES EL CÓDIGO ACTUAL
+           QUÉ CAMBIA RESPECTO DE LA v0.1 (todo de la PARTE 19):
+             - Job Object: ya no quedan llama-server huérfanos aunque
+               portable.exe muera de golpe (la v0.1 sí dejaba ~7 GB).
+             - Mutex de instancia única: el segundo "preguntar" se rechaza con
+               exit 2 en vez de colgarse sin error.
+             - --log-disable fuera: los logs tienen contenido real.
+             - Nuevo archivo ChildProcessJob.cs.
+           Layout: <raíz>\portable 0.2.exe + runtime\ (51 archivos, 44,86 MB)
+           + config.json propio. El modelo va AFUERA del portable, en
+           <raíz>\modelos\, apuntado con config set model-dir.
+
+*** EL .EXE SÍ ES REPRODUCIBLE DENTRO DE LA MISMA CARPETA ***
+  Medido el 27/9:
+      ia_terminal\publish\portable.exe   04:14  68.772.898 b
+        → 437F0212D68A331C28A29CB6F3835FC331D3FE8C8F6E27A80405245E27D044F5
+      portable 0.2.exe (congelada)       03:34  68.772.898 b
+        → 437F0212D68A331C28A29CB6F3835FC331D3FE8C8F6E27A80405245E27D044F5
+  Mismo hash. El publish de las 04:14 da EXACTAMENTE el .exe congelado a las
+  03:34. republicar en la misma carpeta NO genera ruido.
+
+  Y el hash que SÍ cambia es el de la ruta: la ruta del build queda embebida
+  en el portable.pdb, y por eso dos .exe del mismo código publicados en
+  carpetas con rutas de distinta longitud dan .pdb de distinto tamaño (se
+  midieron 41.144 b contra 41.248 b, exactamente 104 bytes de diferencia de
+  longitud de ruta).
+
+  CONCLUSIÓN:
+   1. Repetir el publish en la MISMA carpeta y comparar hashes es una forma
+      gratis de detectar si cambió el código. Si el hash cambió, cambió el
+      código.
+   2. NO comparar .exe publicados en carpetas distintas: van a diferir siempre.
+      Para comparar código, comparar los .cs.
+   3. GUARDAR EL SHA-256 DE LA VERSIÓN CONGELADA SIGUE SIENDO OBLIGATORIO, por
+      el motivo de la PARTE 7: para saber si el .exe que tenés es el que
+      creaste. "Estar ahí" no es "estar bien", y el TAMAÑO NO prueba nada.
+
+  CÓMO USAR EL PUNTO 1:
+      $h1 = (Get-FileHash ".\portable 0.2.exe").Hash
+      # republicar en ESTA carpeta
+      $h2 = (Get-FileHash ".\ia_terminal\publish\portable.exe").Hash
+      $h1 -eq $h2    # True = no cambió nada
+
+Cómo se genera una entrega:
+
+    Get-Process llama-server,portable -EA SilentlyContinue | Stop-Process -Force
+    dotnet publish -c Release -o publish
+    Copy-Item ".\publish\portable.exe" ".\portable 0.2.exe"
+
+LA ENTREGA NO ES UN .exe SUELTO. Para que arranque, al lado del .exe tiene que
+estar el runtime y el config (esto NO lo copia el publish, hay que hacerlo a
+mano):
+
+    IA 27 T\
+      portable 0.2.exe       ← el ejecutable congelado
+      runtime\               ← 51 archivos, 44,86 MB, COPIA de publish\runtime
+      │                        (llama-server.exe + DLLs)
+      config.json            ← configuración de ESTA entrega
+      logs\                  ← lo crea solo al arrancar
+      modelos\               ← el .gguf, por fuera de la entrega
+
+TRAMPA IMPORTANTE: UN PORTABLE SIN RUNTIME PROPIO NO ES PORTABLE.
+  El .exe pelado de la raíz arrancaba "OK" porque ResolveModelDirectory caía en
+  un default hardcodeado y RuntimeLocator encontraba llama-server.exe subiendo
+  desde ahí, en una carpeta vieja de entrenamiento.
+  Resultado: doctor daba OK, pero en otra máquina —o sin esa carpeta— no
+  arrancaba. El "OK" de doctor NO alcanza para dar por bueno un portable: hay
+  que mirar de dónde sacó el runtime, no solo que lo encontró.
+
+CÓMO MONTAR UNA ENTREGA (procedimiento completo y verificado):
+
+    # 1) runtime local, para que no dependa de nada de arriba:
+    Copy-Item ".\ia_terminal\publish\runtime" ".\runtime" -Recurse -Force
+
+    # 2) apuntar al modelo y a los parámetros afinados (PARTE 12)
+    & ".\portable 0.2.exe" config set model-dir "C:\...\IA 27 T\modelos"
+    & ".\portable 0.2.exe" config set model    "Atenea-Omega-IB2.gguf"
+    & ".\portable 0.2.exe" config set threads  8
+    & ".\portable 0.2.exe" config set context  8192
+    & ".\portable 0.2.exe" config set max-tokens 1536
+    & ".\portable 0.2.exe" config set timeout  300
+
+    # 3) verificar (los cuatro, no solo doctor)
+    & ".\portable 0.2.exe" doctor
+    & ".\portable 0.2.exe" listar
+    Get-FileHash ".\modelos\Atenea-Omega-IB2.gguf"   # regla 6
+    & ".\portable 0.2.exe" preguntar "hola" --max-tokens 48
+
+Resultado verificado de la v0.1: doctor OK con runtime propio y modelos en la
+carpeta del proyecto; hash del .gguf 65B8FCD9…AA1423 (intacto, sin copiarse);
+preguntar "hola, decime tu nombre" → "Mi nombre es Atenea Omega Beta (IA-27)."
+
+NO copiar el .gguf adentro de la entrega. Va por fuera, en modelos\, se apunta
+con config set model-dir, y no se duplica: la PARTE 7 documenta una copia del
+.gguf que se corrompió, y duplicarlo serían 4,36 GB que pueden divergir sin que
+nadie se entere.
+
+REGLAS:
+  - Congelar SOLO después de verificar: doctor OK · listar OK · preguntar "hola".
+  - Guardar el SHA-256 en esta bitácora. Es la única forma de saber después si
+    la versión congelada que tenés es la misma.
+  - La entrega congelada NO se sube al repo (está en publish/, gitignored).
+  - El config.json de la entrega es propio de ella. NO es el mismo que
+    publish\config.json: hay dos, uno por ejecutable (P6).
+  - Cada vez que se cierre una versión: 0.2 → 0.3… y se anota aquí el hash, el
+    tamaño y qué cambió respecto de la anterior.
+
+################################################################################
+# PARTE 18 — ICONO DEL PORTABLE
+################################################################################
+
+Fuente del artwork: <carpeta>\Icono\icono_programa_estalingrado.jpg
+                     (1254 × 1254 px)
+
+Convertido a icono multirresolución en el proyecto: ia_terminal\icono.ico
+  16 / 24 / 32 / 48 / 64 / 128 / 256 px, todos 32 bpp BGRA, 372.526 bytes.
+
+Cómo queda aplicado:
+  - <ApplicationIcon>icono.ico</ApplicationIcon> en IaTerminal.csproj
+    → el .exe muestra el icono en el Explorador, en el menú de inicio y
+      en la barra de tareas.
+  - Program.ApplyWindowIcon() pone el MISMO icono en la ventana de consola
+    al arrancar, vía P/Invoke (ExtractIconEx de shell32 + WM_SETICON de
+    user32), leyendo el icono del propio ejecutable. Sin System.Drawing.Common
+    (no existe en .NET 8 sin paquete extra) y sin archivos sueltos al lado,
+    que es lo que permite el single-file.
+
+TRAMPA (no repetir):
+  Al escribir un .ico a mano, la BITMAPINFOHEADER son 40 bytes y biSize va
+  PRIMERO, en offset 0. Si se empieza escribiendo biWidth en offset 0, la
+  cabecera queda corrida 4 bytes: el archivo tiene el tamaño perfecto, el
+  Explorador no muestra icono, System.Drawing.Icon lo rechaza y NO hay
+  ningún error visible. Verificar siempre con un diff de píxeles contra el JPG
+  (la diferencia media por canal tiene que dar 0).
+
+Cómo verificar que el icono quedó en el portable publicado:
+
+    # 1) extraer el icono del .exe y compararlo contra el JPG → debe dar 0
+    # 2) Explorador: si sigue el ícono genérico, es la caché de iconos de
+    #    Windows, no el archivo. Forzar con:
+    Remove-Item "$env:LOCALAPPDATA\IconCache.db" -EA SilentlyContinue
+    ie4uinit.exe -show          (o reiniciar sesión / explorer.exe)
+
+################################################################################
+# PARTE 19 — LOS HUÉRFANOS: POR QUÉ EL MODELO "NO CARGABA" (corregido)
+################################################################################
+
+SÍNTOMA REAL OCURRIDO el 2026-09-27 ~02:58: el portable quedó 10 minutos en
+"Cargando el modelo; la primera carga puede tardar..." sin llegar a responder.
+La PARTE 8 lo atribuía a "procesos huérfanos de sesiones anteriores" como si
+fuera un phenomenon externo. NO LO ERA. Era un bug propio, y por eso volvía.
+
+QUÉ PASÓ REALMENTE
+  Había 4 procesos llama-server vivos, con 6,9 a 7,8 GB de RAM cada uno:
+      PID   2528   7.665 MB
+      PID   3780     757 MB
+      PID  11104   1.629 MB
+      PID  11948       4 MB
+  Total ~13,9 GB sobre 15,9 GB → quedaban 1,6 GB libres. El portable.exe del
+  usuario YA HABÍA MUERTO (no había ningún proceso portable vivo): su ventana
+  era teatro. Y los 3 servidores grandes competían por 8 núcleos lógicos, por
+  eso la carga no avanzaba en vez de fallar rápido.
+
+  O sea: no era que el modelo no cargara. Era que la máquina se había quedado
+  sin RAM, y encima el proceso que gospodaba todo eso ya no existía.
+
+POR QUÉ SE PRODUCÍA (esta es la parte importante)
+  El código SÍ mataba al hijo: LlamaServerSession.DisposeAsync hace
+  process.Kill(entireProcessTree: true), y el catch de StartAsync lo invoca.
+  El problema es que eso solo corre si el proceso DESENROLLA el await using.
+  Si portable.exe muere de golpe — cerrás la ventana con la X, o lo mata el
+  OOM por falta de RAM, o lo mata un taskkill — .NET no ejecuta ningún finally
+  y el llama-server queda huérfano con el modelo cargado en memoria.
+  O sea: huérfano por muerte abrupta, no por error de lógica. Por eso el
+  "Get-Process llama-server | Stop-Process" de la PARTE 8 lo aliviaba pero
+  no lo prevenía: era limpiar a mano lo que el código debía hacer solo.
+
+  Además, FindFreePort elige un puerto libre, así que dos sesiones NO chocan
+  entre sí: conviven tranquilas mientras cada una se come 7 GB.
+
+LA CORRECCIÓN (tres cosas, todas en el código)
+  1) Job Object de Windows — ChildProcessJob.cs (archivo nuevo).
+     Se crea un job con JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE y se mete
+     llama-server adentro (AssignProcessToJobObject) justo después de
+     process.Start(). El kernel mata al hijo SIEMPRE que muera el padre, sin
+     importar cómo muera. Si el Assign falla (proceso ya dentro de un job que
+     no admite anidamiento), cae a un handler AppDomain.ProcessExit que lo
+     mata a mano.
+     TRAMPA al implementarlo: el handle del job NO se puede cerrar antes de
+     terminar la sesión, porque al cerrarlo el job mata a los procesos que
+     contiene. Va guardado como campo en la sesión y se libera en
+     DisposeAsync, después de matar al hijo.
+     P/Invoke usado: CreateJobObject, SetInformationJobObject (JobObjectExtended
+     LimitInformation = 9), AssignProcessToJobObject, CloseHandle. Las structs
+     JOBOBJECT_BASIC_LIMIT_INFORMATION / IO_COUNTERS / EXTENDED van marshaleadas
+     a mano, así que el layout importa: en x64 BasicLimitInformation ocupa 64
+     bytes. Si SetInformationJobObject devuelve false, se cierra el handle y la
+     sesión sigue igual por el camino del ProcessExit.
+
+  2) Mutex de instancia única (TerminalApplication).
+     Un Mutex llamado "IA27Terminal.portable.model" en los comandos que SÍ
+     cargan el modelo: preguntar/run/ask, agent/agente/chat, serve/servidor,
+     doctor y la sesión interactiva. Si ya hay otra, el segundo se rechaza
+     con exit code 2 y un mensaje que dice cuántos llama-server hay vivos y
+     cuántos MB están usando, más el comando de limpieza.
+     Los comandos que NO cargan modelo (listar, info, config, help, version,
+     descargar) NO toman el mutex: se pueden usar con una sesión abierta.
+     OJO, ya me pasó: si envolvés el switch entero en el guard, terminás
+     bloqueando listar/config y el usuario los necesita para diagnosticar
+     justo cuando hay algo colgado. Por eso el guard recibe un bool.
+
+  3) --log-disable eliminado (LlamaServerSession).
+     Este flag apagaba el log de llama-server, y por eso TODOS los archivos en
+     logs\ pesaban 0 bytes. Sin log no hay diagnóstico: hubo que adivinar el
+     problema mirando la lista de procesos. Ahora los logs se llenan (una
+     sesión normal: ~2 KB, 6 líneas de arranque; hay una de 7,5 KB con las
+     métricas de la P12).
+     OJO: el flag servía para que la salida de llama-server no se mezclara con
+     la consola. El log va a un archivo aparte (logWriter), no a la consola, así
+     que se puede quitar sin ensuciar la pantalla.
+
+PRUEBA DEL FIX (no aceptar "compiló" como evidencia)
+  Prueba del huérfano, la importante:
+      1) lanzar `preguntar "hola" --max-tokens 16` en segundo plano
+      2) esperar 25 s → verificar que hay 1 llama-server con ~7,8 GB
+      3) Stop-Process -Force sobre portable.exe (equivale a cerrar con la X)
+      4) RESULTADO: no queda ningún llama-server. El Job Object lo mató.
+      Con el código anterior ese mismo paso dejaba un huérfano de 7,8 GB.
+  Prueba del mutex:
+      sesión A con preguntar viva → segundo preguntar se rechaza (exit 2),
+      mientras listar y config show funcionan con exit 0.
+
+  Tiempos medidos con el fix: carga 53,2 s y 58,5 s en dos corridas limpias.
+  Coincide con los ~60 s que la PARTE 8 ya anotaba.
+
+HALLAZGO NUEVO QUE EL LOG REVELÓ AL QUITAR --log-disable
+  Al volver a escribir el log apareció de inmediato un aviso de llama-server:
+      CORS is set to allow all origins ('*') and no API key is set
+      this can be a security risk (cross-origin attacks)
+  Ver PARTE 20. Sigue sin resolverse.
+
+  Esto es un buen ejemplo de por qué el log servía: el aviso estaba ahí desde
+  el primer arranque, invisible solo por el flag.
+
+TRAMPA DE ENTREGAS: LA v0.1 NO TIENE ESTE FIX
+  Todo esto está en el publish actual y en la v0.2 congelada. La v0.1 es una
+  copia INMUTABLE por definición (PARTE 17), nunca tuvo el fix, y ya no está en
+  la máquina. Si alguna vez se reconstruye desde el commit 6b0d32c, no volver
+  a esa versión: usar la v0.2.
+
+################################################################################
+# PARTE 20 — CORS Y API KEY DEL LLAMA-SERVER (decisión abierta, sin tomar)
+################################################################################
+
+HALLAZGO
+  Cada arranque de llama-server escribe este aviso en el log:
+      CORS is set to allow all origins ('*') and no API key is set
+      this can be a security risk (cross-origin attacks)
+      more info: https://github.com/ggml-org/llama.cpp/pull/25655
+
+POR QUÉ NO ES ACABADO
+  El servidor ya se levanta con --host 127.0.0.1, así que NO es alcanzable
+  desde la red. Pero con CORS en comodín y sin API key, cualquier página web
+  abierta en el navegador puede pegarle a http://127.0.0.1:<puerto> y leer la
+  respuesta del modelo. El puerto es aleatorio (FindFreePort), lo que baja la
+  probabilidad pero no la anula: una página podría barrer puertos.
+  O sea: la amenaza es local, desde el navegador, no desde la red.
+
+ESTADO: NO RESUELTO. No se cambió nada de esto al aplicar el fix de la P19.
+
+OPCIONES (cuando se decida)
+  a) Levantar llama-server con un --api-key aleatorio por sesión y mandarlo en
+     la cabecera de cada request. Es lo que recomienda el aviso upstream.
+  b) Restringir el CORS en vez de dejarlo en '*'.
+  c) Dejarlo como está, aceptando el riesgo local, y que quede escrito que se
+     aceptó a sabiendas.
+
+  Mientras no se elija una, esto es una decisión pendiente, no un descuido.
+
+================================================================================
+FIN DEL DOCUMENTO — IA27 TERMINAL · ESTALINGRADO CORP · INTRA-NET
+================================================================================
