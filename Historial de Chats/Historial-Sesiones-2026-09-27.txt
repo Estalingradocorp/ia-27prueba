@@ -4,6 +4,9 @@ IA27 TERMINAL — Historial de Sesión
 ================================================================================
 Fecha: 2026-09-26/27
 Sesión: Herramientas de agente (READ/CMD/WRITE) + anti-alucinación + Modo Harness
+        + bitácora maestra al día, fin del trabajo en pendrive, y repo al día
+Agente  : A-D con el agente IA27 · E-G con opencode (agente de código)
+Detalle completo: IA27-BITACORA-MAESTRA-Y-REGLAS.txt (en la raíz del repo)
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -137,11 +140,176 @@ El token ghp_...dpI de la cuenta Estalingradocorp quedó expuesto en el chat.
 Recomendación pendiente para el usuario: revocarlo en
 github.com/settings/tokens y no volver a pegarlo (ya no hace falta).
 
-[COMMITS PENDIENTES AL CIERRE DE ESTA SESIÓN]
-Faltan commitear/subir: anti-alucinación + [[END]] (Sesión B) y modo harness
-(Sesión C). A la espera de verificación del usuario del flujo:
-"leer NetCutClone → crear mejoras.txt con toda esta data" con el nuevo
-portable.
+[COMMITS PENDIENTES AL CIERRE DE LA SESIÓN D — RESUELTOS EN LA SESIÓN G]
+Faltaban commitear/subir: anti-alucinación + [[END]] (Sesión B) y modo harness
+(Sesión C). Se subieron el 27/9 04:55 junto con el resto del código pendiente
+y la bitácora. Ver SESIÓN G.
+
+================================================================================
+SESIONES E, F, G — Sesión con opencode: bitácora al día, fin de D:, repo al día
+================================================================================
+
+El agente de código de esta sesión es opencode (no el agente IA27 del portable,
+que es otra cosa distinta: ver bitácora P13). opencode leyó la bitácora, verificó
+el estado real de la máquina con comandos, y corrigió el documento. El patrón
+que se repitió en las tres sesiones: la bitácora afirmaba cosas que la medición
+desmentía.
+
+--------------------------------------------------------------------------------
+SESIÓN E — Bitácora al día: tres afirmaciones que eran falsas
+--------------------------------------------------------------------------------
+PEDIDO: "actualiza el txt IA27-BITACORA-MAESTRA-Y-REGLAS a la vercion local"
+
+[RELEVAMIENTO] Se relevó el estado real: hashes, config, git, logs, modelo.
+Lo encontrado NO coincidía con lo que la bitácora afirmaba:
+
+ 1) P17 DECÍA: "los builds single-file de .NET no son byte-reproducibles porque
+    cambia el MVID". FALSO.
+    Medido: el publish\portable.exe regenerado a las 04:14 dio SHA-256
+    437F0212D68A331C28A29CB6F3835FC331D3FE8C8F6E27A80405245E27D044F5, IDÉNTICO al
+    de la v0.2 congelada a las 03:34. Mismo hash, mismo tamaño.
+    La causa real del hash distinto ENTRE carpetas es la RUTA del build, que
+    queda embebida en el portable.pdb: 41.144 b (D:) contra 41.248 b (OneDrive)
+    = 104 bytes, que es exactamente la diferencia de longitud de las rutas.
+    .NET es determinista desde Core 3.0.
+    CONSECUENCIA ÚTIL: republicar en la misma carpeta y comparar hashes es una
+    forma gratis de detectar si cambió el código.
+
+ 2) P2 DECÍA: "el .git está en D:, no en OneDrive". FALSO.
+    Medido: las dos copias tenían un .git idéntico (0,56 MB, mismo reflog, mismos
+    2 commits, mismo remote). La anotación se había escrito el mismo día del
+    vaciado de OneDrive, sin verificación.
+
+ 3) EL REMOTE ESTABA MAL ESCRITO: faltaba el ".git" del final. La URL anotada
+    (.../IA27Terminal-) no es clonable.
+
+[OTROS HALLAZGOS]
+ - Los 4 config.json quedaron alineados (8192 ctx / 8 hilos / 1536 tok / 300 s).
+ - Las dos copias de fuente coincidían byte a byte (13 archivos, mismo SHA-256).
+ - Hash del .gguf re-verificado sano: 65B8FCD9…AA1423.
+ - INCIDENTE NUEVO (P15/24): las dos copias de fuente divergieron sin que el
+   código se enterara. En la copia de OneDrive, git status mostraba 3 archivos
+   versionados como BORRADOS (Capturas\*.png ×2, Historial-Sesiones-2026-09-25.txt)
+   que en D: sí existían. Un `git add -A` a ciegas los habría borrado del repo.
+ - OTROS INCIDENTES NUEVOS: (P15/25) dos archivos basura de pruebas de [[WRITE]]
+   en la raíz de la entrega (.ia27-write-test-6904.tmp, publish\prueba.txt);
+   (P15/26) código de la versión Python (atenea.py, .md, __pycache__) mezclado
+   con el proyecto .NET; (P15/27) un config.json apuntando a una unidad que ya
+   no existe.
+ - MEDICIÓN DE VELOCIDAD (la que P16 pedía y no existía): del log de las 04:02,
+   ~21 tok/s de prompt y ~5 tok/s de generación. Se cerró el pendiente "no hay
+   número medido".
+ - v0.2 ACREDITADA: su hash coincide con el publish, o sea que la v0.2 congelada
+   ES el código actual. No había nada pendiente de publicar.
+
+[DECISIÓN DEL USUARIO] Qué hacer con las lecciones que venían del pendrive:
+conservar la lección, quitar el D:. Así P7, P17 y P19 siguen con su regla (hash
+del .gguf, hash del .exe, Job Object) pero sin la mecánica de dos unidades.
+
+--------------------------------------------------------------------------------
+SESIÓN F — Fin del trabajo en D:, y opencode como agente del proyecto
+--------------------------------------------------------------------------------
+PEDIDO: "elimina todo sobre trabajar D: de IA27-BITACORA-MAESTRA-Y-REGLAS y
+agrega que el agente es que trabaje como opencode"
+
+[HALLAZGO CRÍTICO AL RELEVAR] D: ya no existe (pendrive desconectado), y los
+config.json apuntaban a D:\Modelo. O sea: la entrega estaba apuntando a un disco
+inexistente y `listar` no encontraba el modelo. No era un problema de código,
+era topología de discos.
+
+[DECISIONES TOMADAS]
+ - Modelo: C:\Users\nicot\OneDrive\Desktop\IA 27 T\modelos\
+   (ya existía ahí una copia con el hash sano; verificado 65B8FCD9…AA1423)
+ - Opencode: anotar identidad + reglas + una sola copia
+ - Lecciones: conservarlas, sacarle el D:
+
+[TRABAJO HECHO]
+ - Los 2 config.json (el de la entrega y el del publish) apuntados a modelos\,
+   con `config set` y no a mano, que es el método documentado (Save() tiene su
+   propia lógica). Verificado: `listar` → exit 0, encuentra el .gguf.
+ - P2 REHECHA: el agente de código es opencode (config en
+   C:\Users\nicot\.config\opencode\), sus reglas son AGENTS.md + la bitácora, y
+   hay UNA sola copia del proyecto. Se terminó la saga de "dónde estaba el .git".
+ - P6: de cuatro config.json a dos (uno por ejecutable).
+ - P20 NUEVA: el aviso de CORS en comodín y sin API key del llama-server, que
+   estaba enterrado al final de la P19, pasa a ser parte propia con sus tres
+   opciones. Sigue SIN resolver.
+ - Se conservó la numeración 1-19 para no romper las referencias internas del
+   tipo "ver PARTE 19".
+ - Se eliminó toda referencia operativa a D: y al pendrive. Quedan 6 menciones,
+   todas históricas (el changelog, la nota de que la v0.1 se fue con el pendrive,
+   y la regla de "no crees una segunda copia").
+
+[PENDIENTE QUE SURGIÓ] Queda un .gguf DUPLICADO en la ruta vieja
+(C:\Users\nicot\OneDrive\Documentos\modelos IA\models\), mismo hash, 4,36 GB.
+Es justo el riesgo de la P7. Anotado como prioridad en P16.
+Además: modelos\ está dentro de OneDrive, así que OneDrive va a querer subir
+4,36 GB del .gguf a la nube. Advertido.
+
+--------------------------------------------------------------------------------
+SESIÓN G — La bitácora entra al repo, y el push sale rechazado
+--------------------------------------------------------------------------------
+PEDIDO: "actualiza la repo https://github.com/Estalingradocorp/IA27Terminal-
+agrega IA27-BITACORA-MAESTRA-Y-REGLAS tambien"
+
+[GIT RESTAURADO] Antes de commitear, los 3 archivos que aparecían como borrados
+se recuperaron con `git restore "Capturas" "Historial de Chats"`. NO estaban
+perdidos: estaban en el commit 6b0d32c. El "D" de git status es ausencia del
+disco, no del repo. Esa distinción es la lección de la P15/24.
+
+[BITÁCORA AL REPO] Se movió de la raíz de "IA 27 T" (fuera del repo, sin
+versionar, había que copiarla a mano) a la raíz de ia_terminal\, al lado de
+AGENTS.md. Se movió, no se copió: la regla de una sola copia.
+
+[AGENTS.md ACTUALIZADO] Tenía entera la sección "Despliegue en pendrive (reglas)"
+con `dotnet publish -o "D:\IA 27 T\..."`, el layout <stick>\ y la regla de
+"verificar hash tras copiar al USB". Reemplazada por el layout local, los dos
+config.json, y dos reglas nuevas: nunca `git add -A` a ciegas, y el repo es el
+único respaldo.
+
+[EL PUSH FUE RECHAZADO] origin/main tenía un commit que no estaba en la rama
+local: a0fc1bb "Portable USB: config junto al ejecutable, resolucion de modelos
+portatil y proteccion contra copias corruptas".
+NO era trabajo ajeno: era el MISMO estado del working tree que ya había en este
+disco, commiteado desde el otro lado. Por eso AppConfig.cs, LlamaServerSession.cs
+y TerminalApplication.cs mergearon SIN un solo conflicto: eran idénticos.
+El único conflicto real fue AGENTS.md, donde los dos lados habíamos tocado la
+misma sección. Se resolvió con la versión local (34 agregados, 12 eliminados).
+
+[LO QUE EL MERGE RESCATÓ] a0fc1bb traía un archivo que faltaba en este disco:
+Historial de Chats/Historial-Sesiones-2026-09-27.txt. Estaba en GitHub pero no
+en la máquina. Con el merge bajó. Sin integrar ese commit, se perdía al
+sincronizar. (Este archivo es el que se está editando ahora.)
+
+[COMMITS]
+ 97ff425  el código pendiente, incluido ChildProcessJob.cs (el fix de la P19,
+          que vivía SOLO en el disco), el mutex, BuildEnvironmentInfo, el
+          harness, e icono.ico + su enganche en el csproj
+ eabb265  la bitácora al repo + AGENTS.md + README
+ c486c71  merge de a0fc1bb
+ → a0fc1bb..c486c71, verificado con la API de GitHub
+
+[NO SE REPUBLICÓ EL PORTABLE] El merge no cambió ningún .cs (solo .md, .txt y
+un archivo de historial), así que el hash reproducible de la v0.2 sigue siendo
+válido y no hacía falta recompilar.
+
+[ESTADO FINAL DEL REPO — 2026-09-27]
+ 4 commits, todo commiteado. Raíz del repo en GitHub:
+   .gitignore · AGENTS.md · AppConfig.cs · Capturas/ · ChildProcessJob.cs ·
+   GgufMetadataReader.cs · Historial de Chats/ ·
+   IA27-BITACORA-MAESTRA-Y-REGLAS.txt (60.400 b) · IaTerminal.csproj ·
+   LlamaServerSession.cs · ModelCatalog.cs · ModelRegistry.cs · Program.cs ·
+   README.md · TerminalApplication.cs · icono.ico
+ Fuera del repo a propósito (.gitignore): publish/ · bin/ · obj/ · logs/ ·
+   runtime/ · config.json / el .gguf (4,36 GB).
+
+[LO QUE SIGUE ABIERTO]
+ - Token ghp_...dpI de la cuenta Estalingradocorp: el aviso de la Sesión D
+   sigue PENDIENTE. No se revocó. Recomendación: revocarlo en
+   github.com/settings/tokens. Ya no hace falta para nada.
+ - Borrar el .gguf duplicado de la ruta vieja (4,36 GB).
+ - Decidir lo del CORS + sin API key del llama-server (bitácora P20).
+ - Probar /harness de verdad con una tarea real.
 
 ================================================================================
 COMANDOS DISPONIBLES EN EL AGENTE (estado actual)
@@ -152,6 +320,9 @@ COMANDOS DISPONIBLES EN EL AGENTE (estado actual)
 
 Herramientas del modelo: [[NET]] búsqueda web · [[READ]] leer archivo/carpeta
 [[CMD]] PowerShell (s/n) · [[WRITE]] ruta :: contenido [[END]] (s/n)
+
+Layout: todo en C:\Users\nicot\OneDrive\Desktop\IA 27 T\ (una sola copia, sin
+pendrive). Entrega: portable 0.2.exe + runtime\ + config.json + modelos\.
 
 ================================================================================
 FIN DEL HISTORIAL
