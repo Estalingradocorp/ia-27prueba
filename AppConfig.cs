@@ -72,7 +72,19 @@ public sealed class AppConfig
 
     public void Save()
     {
+        // La ruta de modelos que el usuario acaba de fijar manda sobre la
+        // resolución automática portable; si no, se perdería al guardar.
+        var requestedModelDirectory = ModelDirectory;
         Normalize();
+        if (!string.IsNullOrWhiteSpace(requestedModelDirectory))
+        {
+            var requested = requestedModelDirectory.Trim().Trim('"');
+            if (Directory.Exists(Expand(requested)))
+            {
+                ModelDirectory = Path.GetFullPath(Expand(requested));
+            }
+        }
+
         var directory = Path.GetDirectoryName(ConfigPath);
         if (!string.IsNullOrWhiteSpace(directory))
         {
@@ -108,7 +120,10 @@ public sealed class AppConfig
 
     public void Normalize()
     {
-        ModelDirectory = ExpandPath(ModelDirectory, DefaultModelDirectory);
+        // Modo pendrive: priorizar una carpeta "models" junto al ejecutable o una
+        // carpeta de modelos en un nivel superior (../.. /Modelo), para que el
+        // portable funcione sin importar la letra de unidad.
+        ModelDirectory = ResolveModelDirectory(ModelDirectory);
         RuntimeDirectory = string.IsNullOrWhiteSpace(RuntimeDirectory)
             ? null
             : ExpandPath(RuntimeDirectory, AppContext.BaseDirectory);
@@ -129,6 +144,64 @@ public sealed class AppConfig
         }
     }
 
+    private static string ResolveModelDirectory(string? configured)
+    {
+        // 1) Carpeta "models" junto al ejecutable: es el layout portable canónico
+        //    y debe ganar siempre sobre rutas absolutas de otra máquina.
+        //    Solo si contiene al menos un .gguf (una carpeta vacía no debe tapar
+        //    la ruta configurada).
+        var portableModels = Path.Combine(AppContext.BaseDirectory, "models");
+        if (Directory.Exists(portableModels) && ContainsGguf(portableModels))
+        {
+            return Path.GetFullPath(portableModels);
+        }
+
+        var configuredPath = string.IsNullOrWhiteSpace(configured)
+            ? null
+            : Path.GetFullPath(Expand(configured.Trim().Trim('"')));
+        if (configuredPath is not null && Directory.Exists(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        // 2) Buscar "Modelo"/"models"/"Modelos" hasta 3 niveles arriba del ejecutable.
+        //    Permite portable en <raiz>\carpeta\publish y modelos en <raiz>\Modelo,
+        //    sin depender de la letra de unidad.
+        var cursor = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var level = 0; level < 3 && cursor?.Parent is not null; level++)
+        {
+            cursor = cursor.Parent;
+            foreach (var name in new[] { "Modelo", "models", "Modelos", "modelos IA" })
+            {
+                var candidate = Path.Combine(cursor.FullName, name);
+                if (Directory.Exists(candidate) && ContainsGguf(candidate))
+                {
+                    return Path.GetFullPath(candidate);
+                }
+            }
+        }
+
+        // 3) Sin candidatos: conservar la ruta configurada (o la por defecto)
+        //    para que el diagnóstico muestre una ruta útil.
+        return configuredPath ?? Path.GetFullPath(Expand(DefaultModelDirectory));
+    }
+
+    private static bool ContainsGguf(string directory)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(directory, "*.gguf", SearchOption.AllDirectories).Any();
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private static string ExpandPath(string? value, string fallback)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -146,6 +219,28 @@ public sealed class AppConfig
 
     private static string GetDefaultConfigPath()
     {
+        // Modo pendrive: la configuración viaja con el ejecutable.
+        // Si la carpeta del portable no es escribible, se cae a %APPDATA%.
+        var portable = Path.Combine(AppContext.BaseDirectory, "config.json");
+        try
+        {
+            var directory = Path.GetDirectoryName(portable)!;
+            Directory.CreateDirectory(directory);
+            if (IsWritable(directory))
+            {
+                return portable;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        catch (NotSupportedException)
+        {
+        }
+
         var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         if (string.IsNullOrWhiteSpace(root))
         {
@@ -153,5 +248,24 @@ public sealed class AppConfig
         }
 
         return Path.Combine(root, "IA27Terminal", "config.json");
+    }
+
+    private static bool IsWritable(string directory)
+    {
+        var probe = Path.Combine(directory, $".ia27-write-test-{Environment.ProcessId}.tmp");
+        try
+        {
+            File.WriteAllText(probe, "ok");
+            File.Delete(probe);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 }

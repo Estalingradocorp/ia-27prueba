@@ -22,13 +22,14 @@ public sealed class LlamaServerSession : IAsyncDisposable
         private readonly string logPath;
         private HttpClient? httpClient;
         private Process? process;
+        private ChildProcessJob? childJob;
         private StreamWriter? logWriter;
         private int port;
         private bool netAutoAllowed;
 
     private const string NetPolicy = "ACCESO A INTERNET: está habilitado bajo autorización del usuario y TÚ SÍ PUEDES buscar en internet a través del sistema. NUNCA digas que no puedes navegar ni que no tienes acceso a internet: eso es falso. REGLA OBLIGATORIA: si el usuario pregunta por una entidad concreta (empresa, corporación, persona, producto, lugar, organización, evento) o por datos actuales o específicos (noticias, clima, precios, fechas, estadísticas) y no tienes certeza absoluta del dato, tu mensaje debe EMPEZAR directamente con [[NET]] seguido de la consulta breve (máximo 12 palabras), sin ningún texto, explicación ni comilla antes o después. Ejemplo de salida válida: \"[[NET]] Estalingrado Corp empresa\". El sistema buscará por ti y te llegará un mensaje con los resultados reales para responder con ellos. Si no llegan resultados o el usuario lo deniega, responde con tu propio conocimiento dejando claro que no está verificado. Ante la duda, busca: es preferible a dar un dato inventado.";
 
-    private const string ToolsPolicy = "HERRAMIENTAS LOCALES: tienes tres herramientas del sistema para actuar sobre el equipo del usuario. NUNCA digas que no puedes leer archivos ni ejecutar comandos: sí puedes, a través de estas herramientas. Para usar una herramienta, tu mensaje debe EMPEZAR directamente con el marcador correspondiente y nada más antes, sin texto, explicación ni comillas previas: [[READ]] seguido de la ruta de un archivo o carpeta (lee el archivo o lista la carpeta; úsala cuando el usuario pida ver, analizar, resumir o revisar archivos locales); [[CMD]] seguido de un comando de PowerShell (el sistema pedirá permiso al usuario y luego lo ejecuta); [[WRITE]] + ruta + \" :: \" + el contenido completo del archivo (crea o reemplaza el archivo; pide permiso al usuario). Ejemplo de salida válida: \"[[READ]] C:\\proyecto\\Program.cs\". Ejemplo de salida válida: \"[[CMD]] Get-ChildItem\". Ejemplo de salida válida: \"[[WRITE]] C:\\proyecto\\nota.txt :: hola mundo\". Tras usar una herramienta recibirás su resultado real en el siguiente mensaje: responde con esos datos y nunca inventes el resultado. Si el usuario deniega el permiso o la herramienta falla, infórmalo sin inventar.";
+    private const string ToolsPolicy = "HERRAMIENTAS LOCALES: tienes tres herramientas del sistema para actuar sobre el equipo del usuario. NUNCA digas que no puedes leer archivos ni ejecutar comandos: sí puedes, a través de estas herramientas. Para usar una herramienta, tu mensaje debe EMPEZAR directamente con el marcador correspondiente y nada más antes, sin texto, explicación ni comillas previas: [[READ]] seguido de la ruta de un archivo o carpeta (lee el archivo o lista la carpeta; úsala cuando el usuario pida ver, analizar, resumir o revisar archivos locales); [[CMD]] seguido de un comando de PowerShell (el sistema pedirá permiso al usuario y luego lo ejecuta); [[WRITE]] + ruta + \" :: \" + el contenido completo del archivo + [[END]] (crea o reemplaza el archivo; pide permiso al usuario). Ejemplo de salida válida: \"[[READ]] C:\\proyecto\\Program.cs\". Ejemplo de salida válida: \"[[CMD]] Get-ChildItem\". Ejemplo de salida válida de escritura con contenido largo:\n[[WRITE]] C:\\proyecto\\mejoras.txt :: Título del documento\n- Primer punto del contenido\n- Segundo punto del contenido\n[[END]]\nEl [[END]] de cierre es OBLIGATORIO en [[WRITE]]: sin él el archivo NO se crea. REGLA CRÍTICA: jamás afirmes que creaste un archivo (\"he creado...\", \"archivo creado en...\") ni que ejecutaste un comando sin haber emitido su marcador; afirmarlo sin el marcador es mentira. Tras usar una herramienta recibirás un mensaje del sistema con el resultado real (incluida la confirmación de archivo creado con su ruta y tamaño): solo entonces puedes decir que el archivo existe, citando esa confirmación. Nunca inventes resultados.";
 
     public LlamaServerSession(AppConfig config, ModelDescriptor model)
     {
@@ -100,7 +101,6 @@ public sealed class LlamaServerSession : IAsyncDisposable
             AddArgument(startInfo, "--chat-template", config.ChatTemplate);
         }
         AddArgument(startInfo, "--no-warmup");
-        AddArgument(startInfo, "--log-disable");
 
         process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, eventArgs) => WriteLog(eventArgs.Data, false);
@@ -112,6 +112,14 @@ public sealed class LlamaServerSession : IAsyncDisposable
             if (!process.Start())
             {
                 throw new TerminalException("No se pudo iniciar llama-server.exe.");
+            }
+
+            childJob = new ChildProcessJob("IA27Terminal.llamaServer");
+            if (!childJob.Assign(process))
+            {
+                childJob.Dispose();
+                childJob = null;
+                AppDomain.CurrentDomain.ProcessExit += (_, _) => KillChildOnExit();
             }
 
             process.BeginOutputReadLine();
@@ -360,6 +368,15 @@ public sealed class LlamaServerSession : IAsyncDisposable
         history.Add(new ChatMessage { Role = "user", Content = content });
     }
 
+    private static string BuildEnvironmentInfo(string modelDirectory)
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        var downloads = Path.Combine(userProfile, "Downloads");
+        return $"ENTORNO REAL DEL EQUIPO: usuario de Windows = \"{Environment.UserName}\"; carpeta de trabajo actual = \"{Environment.CurrentDirectory}\"; Documentos = \"{documents}\"; Escritorio = \"{desktop}\"; Descargas = \"{downloads}\"; carpeta de modelos = \"{modelDirectory}\"; fecha de hoy = {DateTime.Now:yyyy-MM-dd}. Cuando el usuario diga \"Documentos\", \"Escritorio\", \"Descargas\" o \"la carpeta del proyecto\", te referís a esas rutas exactas y las escribís COMPLETAS en los marcadores. PROHIBIDO usar rutas placeholder (TuNombreDeUsuario, NombreDeUsuario, YourName, %USERNAME%, etc.): si no conocés una ruta real, usá la carpeta de trabajo actual.";
+    }
+
     private string BuildSystemPrompt()
     {
         var prompt = config.SystemPrompt;
@@ -368,7 +385,7 @@ public sealed class LlamaServerSession : IAsyncDisposable
             prompt += Environment.NewLine + Environment.NewLine + NetPolicy;
         }
 
-        return prompt + Environment.NewLine + Environment.NewLine + ToolsPolicy;
+        return prompt + Environment.NewLine + Environment.NewLine + BuildEnvironmentInfo(config.ModelDirectory) + Environment.NewLine + Environment.NewLine + ToolsPolicy;
     }
 
     public async ValueTask DisposeAsync()
@@ -394,6 +411,12 @@ public sealed class LlamaServerSession : IAsyncDisposable
             process = null;
         }
 
+        if (childJob is not null)
+        {
+            childJob.Dispose();
+            childJob = null;
+        }
+
         if (httpClient is not null)
         {
             httpClient.Dispose();
@@ -405,6 +428,26 @@ public sealed class LlamaServerSession : IAsyncDisposable
             await logWriter.FlushAsync();
             logWriter.Dispose();
             logWriter = null;
+        }
+    }
+
+    private void KillChildOnExit()
+    {
+        var running = process;
+        if (running is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!running.HasExited)
+            {
+                running.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception)
+        {
         }
     }
 

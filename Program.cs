@@ -1,9 +1,25 @@
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace IaTerminal;
 
 public static class Program
 {
+    private const int WmSetIcon = 0x0110;
+    private const int IconSmall = 0;
+    private const int IconBig = 1;
+
+    private static readonly List<IntPtr> IconHandles = new();
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint ExtractIconEx(string lpszFile, int nIconIndex, IntPtr[]? phiconLarge, IntPtr[]? phiconSmall, uint nIcons);
+
     public static async Task<int> Main(string[] args)
     {
         var previousTitle = string.Empty;
@@ -19,6 +35,7 @@ public static class Program
         }
 
         ConfigureStyle();
+        ApplyWindowIcon();
         try
         {
             return await new TerminalApplication().RunAsync(args);
@@ -51,6 +68,51 @@ public static class Program
             catch (IOException)
             {
             }
+        }
+    }
+
+    private static void ApplyWindowIcon()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            var window = GetConsoleWindow();
+            if (window == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var executable = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executable))
+            {
+                return;
+            }
+
+            var large = new IntPtr[1];
+            var small = new IntPtr[1];
+            if (ExtractIconEx(executable, 0, large, small, 1) == 0)
+            {
+                return;
+            }
+
+            if (small[0] != IntPtr.Zero)
+            {
+                SendMessage(window, WmSetIcon, new IntPtr(IconSmall), small[0]);
+                IconHandles.Add(small[0]);
+            }
+
+            if (large[0] != IntPtr.Zero)
+            {
+                SendMessage(window, WmSetIcon, new IntPtr(IconBig), large[0]);
+                IconHandles.Add(large[0]);
+            }
+        }
+        catch (Exception)
+        {
         }
     }
 
