@@ -1,0 +1,158 @@
+================================================================================
+ESTALINGRADO CORP · INTRA-NET
+IA27 TERMINAL — Historial de Sesión
+================================================================================
+Fecha: 2026-09-26/27
+Sesión: Herramientas de agente (READ/CMD/WRITE) + anti-alucinación + Modo Harness
+================================================================================
+
+--------------------------------------------------------------------------------
+SESIÓN A — Herramientas de agente (Fase 1 del plan "agente tipo OpenCode")
+--------------------------------------------------------------------------------
+
+[ORIGEN]
+En el chat con IA27, el modelo sugirió capacidades para volverse un agente
+como OpenCode. Se implementó SOLO la Fase 1 (herramientas), descartando:
+fine-tuning, voz multimodal y autenticación (no aplican a terminal local 7B).
+
+[MARCADORES IMPLEMENTADOS]
+- [[READ]] ruta    → lee archivo (máx. 4000 chars) o lista carpeta.
+                     Libre dentro del área de trabajo; fuera pide permiso.
+- [[CMD]] comando  → ejecuta PowerShell (cwd del proyecto, timeout 30 s).
+                     SIEMPRE pide confirmación s/n. Patrones destructivos
+                     (Remove-Item -Recurse -Force, format, shutdown, etc.)
+                     muestran advertencia roja extra.
+- [[WRITE]] ruta :: contenido → crea/reemplaza archivo. SIEMPRE pide s/n
+                     con vista previa del contenido.
+
+[ARQUITECTURA]
+- LlamaServerSession.cs: nueva ToolsPolicy en el system prompt (mensaje debe
+  EMPEZAR con el marcador, sin texto previo).
+- TerminalApplication.cs: MatchToolRequest, ExecuteReadTool, ExecuteCmdToolAsync,
+  ExecuteWriteTool, ConfirmTool, sandbox de rutas (IsInsideSandbox), límite de
+  5 herramientas por turno, intención explícita ("lee el archivo X", "ejecuta
+  dir", "creame el archivo ... que diga ...") ejecutada ANTES de consultar
+  al modelo.
+- Buffer anti-fugas existente cubre los nuevos marcadores automáticamente.
+
+--------------------------------------------------------------------------------
+SESIÓN B — Bug: el modelo alucinó la creación de archivos
+--------------------------------------------------------------------------------
+
+[SÍNTOMA REPORTADO POR EL USUARIO]
+La primera escritura funcionó (pidió permiso, creó prueba.txt), pero después
+el modelo dijo "He creado el archivo mejoras.txt" DOS veces sin crear nada.
+Además prueba.txt quedó contaminado: contenía la frase del asistente
+"¿Necesitas realizar alguna otra acción?" dentro del archivo.
+
+[CAUSAS RAÍZ]
+1. WriteRequestPattern capturaba [\s\S]*$ → TODO hasta el fin del mensaje,
+   incluido el chatter posterior al contenido.
+2. El 7B aprendió del historial que "afirmar la creación" era la respuesta
+   esperada, y dejó de emitir [[WRITE]] en contenidos largos.
+3. ExplicitWriteIntent exigía la palabra "archivo" + cuerpo literal; no
+   capturó: "crea un tecto en esa carpepeta con el titulo mejoras con toda
+   esta data" ni "si crea un txt con ese texto aqui C:\..." (typos + ruta en
+   otra posición + cuerpo referencial).
+
+[FIXES APLICADOS]
+1. Cierre obligatorio [[END]]: [[WRITE]] ruta :: contenido [[END]].
+   Sin [[END]] → marcador malformado, NO se crea nada, reintento forzado.
+2. Anti-alucinación (WriteClaimPattern / CmdClaimPattern): si el modelo
+   afirma "he creado el archivo / ejecuté el comando" sin haber usado la
+   herramienta en ese turno → se descarta la respuesta falsa, se inyecta
+   orden estricta de reemitir con marcador (máx. 2 reintentos).
+3. ToolsPolicy reforzada: ejemplo multi-línea realista, prohibición explícita
+   de afirmar creación sin marcador, solo se puede afirmar citando la
+   confirmación [SISTEMA · archivo creado: ruta, N bytes].
+4. ExplicitWriteIntent ampliado: sustantivos archivo/fichero/txt/texto/tecto/
+   nota/documento; fillers iniciales (si/dale/ahora/ok/y); ruta absoluta o
+   relativa en CUALQUIER posición; cuerpo referencial ("con toda esta data",
+   "ese texto") → no ejecuta, inyecta orden al modelo de emitir [[WRITE]]
+   con contenido del contexto.
+5. lastToolPath: la sesión recuerda la última ruta de herramienta; pedidos
+   sin ruta ("en esa carpeta", "con el título mejoras") se resuelven ahí.
+
+[VERIFICACIÓN DE REGEX (PowerShell, motor .NET)]
+- "[[WRITE]] C:\x\mejoras.txt :: Titulo\n[[END]]\n¿Algo mas?" → body limpio ✓
+- "[[WRITE]] ... :: sin cierre" → sin match (protegido) ✓
+- Frases reales del chat (con typos) → todas detectadas ✓
+- "no pude crear el archivo porque denegaste" → NO dispara claim ✓
+
+--------------------------------------------------------------------------------
+SESIÓN C — Modo Harness (bucle agéntico propio)
+--------------------------------------------------------------------------------
+
+[PEDIDO]
+"le podemos instalar HARNESS AGENT?" → aclarado: bucle agéntico propio
+(plan → ejecutar → verificar → iterar), no la plataforma Harness.io.
+
+[IMPLEMENTACIÓN]
+- Nuevo comando: /harness <objetivo> (alias: /agente)
+- RunHarnessAsync en TerminalApplication.cs:
+  1. Inyecta [SISTEMA · MODO HARNESS ACTIVADO] con el objetivo.
+  2. Cada paso el modelo hace UNA cosa: plan numerado / UNA herramienta /
+     [[DONE]] + resumen final.
+  3. Tras cada herramienta recibe el resultado real y debe verificarlo.
+  4. Límite: HarnessMaxSteps = 15 pasos; al llegar, cierra con aviso.
+  5. Marcador malformado → no ejecuta nada, reintenta el paso.
+  6. Buffer anti-fugas replicado: ningún marcador se imprime.
+  7. Ctrl+C aborta en cualquier momento; permisos s/n intactos para
+     [[CMD]] y [[WRITE]].
+
+[COMPILACIÓN/PUBLICACIÓN]
+dotnet build -c Release: OK (0 errores)
+dotnet publish -c Release -o publish: OK
+portable.exe regenerado: 27/9/2026 00:30 (67,6 MB)
+
+--------------------------------------------------------------------------------
+SESIÓN D — Documentación, regla del portable y subida al repo
+--------------------------------------------------------------------------------
+
+[DOCUMENTACIÓN]
+- README.md: sección "Herramientas de agente" (tabla READ/CMD/WRITE +
+  seguridad + anti-alucinación + [[END]]), característica Modo harness,
+  comando /harness en la tabla de comandos.
+- AGENTS.md (NUEVO): contexto del proyecto, arquitectura, patrón de
+  herramientas, modo harness, problemas conocidos (no regresar).
+
+[REGLA PERMANENTE — AGENTS.md]
+"Después de CUALQUIER cambio en el código fuente, hay que compilar Y
+publicar: dotnet build -c Release && dotnet publish -c Release -o publish.
+Un cambio de código que no llega al portable no existe para el usuario."
+(publish/ está en .gitignore: el portable se actualiza local, no se sube.)
+
+[GIT]
+- Repo remoto Estalingradocorp/IA27Terminal- fallaba ("Repository not found"):
+  la cuenta gh logueada (nicotips27) no tenía acceso al repo privado.
+- Se agregó nicotips27 como COLABORADOR con permiso write (push) usando el
+  token de la cuenta propietaria; invitación aceptada automáticamente.
+  Desde entonces push/pull funcionan con credenciales normales.
+- Commit subido: 6b0d32c "IA27 Terminal: herramientas de agente READ/CMD/WRITE
+  con confirmacion" (LlamaServerSession.cs, TerminalApplication.cs, README.md,
+  AGENTS.md).
+
+[AVISO DE SEGURIDAD REGISTRADO]
+El token ghp_...dpI de la cuenta Estalingradocorp quedó expuesto en el chat.
+Recomendación pendiente para el usuario: revocarlo en
+github.com/settings/tokens y no volver a pegarlo (ya no hace falta).
+
+[COMMITS PENDIENTES AL CIERRE DE ESTA SESIÓN]
+Faltan commitear/subir: anti-alucinación + [[END]] (Sesión B) y modo harness
+(Sesión C). A la espera de verificación del usuario del flujo:
+"leer NetCutClone → crear mejoras.txt con toda esta data" con el nuevo
+portable.
+
+================================================================================
+COMANDOS DISPONIBLES EN EL AGENTE (estado actual)
+================================================================================
+/help  /clear  /history  /system [texto]  /modelos  /cambiar  /use <sel>
+/descargar  /temp [valor]  /rp [valor]  /topp [valor]  /tokens [valor]
+/net [on|off]  /harness <objetivo>  /exit
+
+Herramientas del modelo: [[NET]] búsqueda web · [[READ]] leer archivo/carpeta
+[[CMD]] PowerShell (s/n) · [[WRITE]] ruta :: contenido [[END]] (s/n)
+
+================================================================================
+FIN DEL HISTORIAL
+================================================================================
