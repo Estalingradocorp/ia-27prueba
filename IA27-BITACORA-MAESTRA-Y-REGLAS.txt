@@ -7,7 +7,9 @@ AGENTE    : opencode  ← el que programa y mantiene esto (ver PARTE 2)
 Este doc  : IA27-BITACORA-MAESTRA-Y-REGLAS.txt, EN EL REPO (raíz de
             ia_terminal\), junto a AGENTS.md. Se versiona con el código, así
             que viaja con él y no hay que acordarse de copiarlo a mano.
-Carpeta   : C:\Users\nicot\OneDrive\Desktop\IA 27 T\
+Carpeta   : C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\
+             (antes: Desktop\IA 27 T\ — la carpeta se movió el 27/9; ver P15
+             punto 34 y la actualización de rutas de esta misma fecha)
              ia_terminal\                      ← código fuente + .git + este doc
              ia_terminal\publish\portable.exe  ← el ejecutable real
              portable 0.2.exe                  ← entrega congelada (ver P17)
@@ -17,11 +19,12 @@ Carpeta   : C:\Users\nicot\OneDrive\Desktop\IA 27 T\
              logs\                             ← lo crea solo al arrancar
 Portable  : ia_terminal\publish\portable.exe
              CON los fixes (Job Object + mutex + logs, ver PARTE 19).
-Entrega   : portable 0.2.exe  ·  68.772.898 bytes  ·  2026-09-27 03:34
-             SHA-256 437F0212D68A331C28A29CB6F3835FC331D3FE8C8F6E27A80405245E27D044F5
-             Montada y verificada 03:45, reverificada el 27/9 04:25 y de nuevo
-             tras el cambio de carpeta del modelo. Es la buena.
-Versión   : 0.2   ← ACTUAL
+Entrega   : portable 0.2.exe  ·  68.797.474 bytes  ·  2026-09-27 15:2x
+             SHA-256 7AEB42E94A867F23666B7623F08C8016153C94AEC3A2DC724B8FA295FFE63399
+             ACTUALIZADA el 27/9 con el código actual (búsqueda por intención,
+             PARTE 22). Ya no es la congelada de las 03:34: ver PARTE 17 para
+             el hash histórico y la regla de actualización.
+Versión   : 0.2   ← CONGELADA (ver PARTE 21)
              0.1   (2026-09-27 02:23)  SIN los fixes de la PARTE 19. Ya no está
                    en esta máquina (se fue con el pendrive); queda su hash
                    anotado en la P17 por si hay que reconstruirla.
@@ -35,6 +38,35 @@ SDK       : .NET 8.0.424
 C: libre  : 339,4 GB
 Estado    : TODO LOCAL Y TODO VERSIONADO. Una sola copia del código, un solo
             modelo, una sola entrega, un solo .git (ver P2).
+Fase      : ENTRENAMIENTO. Se está probando al agente con tareas reales y se
+            guardan los historiales para alimentar esta bitácora.
+            Historiales: C:\Users\nicot\OneDrive\Documentos\IA27 CHATS\
+            Veredicto al 27/9: FALLÓ la prueba de mejorar la web
+            (Documentos\Fury³, la misma de PARTE 21: enseña el código en el
+            chat en vez de escribir), pero FUNCIONÓ para encontrar información
+            local por internet (Despensa Nancy, el almacén de la esquina).
+            Con matices: los datos que no estaban en la búsqueda, los inventó
+            (ver P15 punto 36).
+
+Actualizado: 2026-09-27 (entrega) — `portable 0.2.exe` se actualizó con el
+  código actual (PARTE 22): 68.797.474 bytes, hash 7AEB42E9…63399, verificado
+  idéntico al publish. Regla nueva en PARTE 17: la entrega se puede actualizar
+  a pedido, anotando el cambio de hash. Pendiente P16.14: decidir si se mantiene
+  este esquema o se vuelve a versiones congeladas.
+
+Actualizado: 2026-09-27 (PARTE 22) — [[NET]] pasa de "un solo motor" a BÚSQUEDA
+  POR INTENCIÓN: dónde→Nominatim, clima→Open-Meteo, general→Wikipedia
+  extracto + DDG con el texto plano de la página ganadora. Detectado y corregido
+  en la prueba: sin sesgo `countrycodes=ar`, "salta" matcheaba Salta Carnero
+  (España). Verificado con el modelo real (PARTE 22).
+
+Actualizado: 2026-09-27 (mudanza) — la carpeta del proyecto se movió de
+  Desktop\IA 27 T\ a Desktop\Estalingrado corp\proyectos\IA 27 T\. Los 2
+  config.json quedaron apuntando a la ruta muerta (la P15.27 otra vez, ahora
+  por mudanza y no por disco desconectado): corregidos con `config set
+  model-dir` en los dos ejecutables y verificados con `listar`. Rutas de esta
+  bitácora y AGENTS.md actualizadas. Historiales de la fase de entrenamiento
+  registrados: ver "Fase" de arriba y P15 puntos 34-36.
 
 Actualizado: 2026-09-27 04:55
   · ESTA BITÁCORA ENTRA AL REPO. Estaba fuera de ia_terminal\, o sea que no se
@@ -96,13 +128,13 @@ QUIÉN PROGRAMA ESTO
 
   Para opencode, en concreto:
     · Configuración y skills:  C:\Users\nicot\.config\opencode\
-    · Carpeta de trabajo:      C:\Users\nicot\OneDrive\Desktop\IA 27 T\
+    · Carpeta de trabajo:      C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\
     · El proyecto es ia_terminal\, y ahí está el .git.
     · Las dos reglas de este proyecto son AGENTS.md y este archivo. Los dos
       están en la raíz del repo, así que se leen juntos al empezar.
 
 LA REGLA DE UNA SOLA COPIA
-  Todo vive en C:\Users\nicot\OneDrive\Desktop\IA 27 T\:
+  Todo vive en C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\:
 
       ia_terminal\          código + .git + AGENTS.md + esta bitácora
       ia_terminal\publish\  el portable recién hecho
@@ -131,7 +163,7 @@ LA REGLA DE UNA SOLA COPIA
   .gguf. Por eso el hash del modelo está anotado en la PARTE 7.
 
 EL REPO
-      git -C "C:\Users\nicot\OneDrive\Desktop\IA 27 T\ia_terminal" remote -v
+      git -C "C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\ia_terminal" remote -v
       → origin  https://github.com/Estalingradocorp/IA27Terminal-.git
   Ojo con la URL: sin el ".git" del final NO es clonable. Ya se corrigió una
   vez por escribirla de memoria.
@@ -161,7 +193,7 @@ EL REPO
 # PARTE 2 (bis) — ARQUITECTURA DEL PROYECTO
 ################################################################################
 
-Archivos fuente, en C:\Users\nicot\OneDrive\Desktop\IA 27 T\ia_terminal\:
+Archivos fuente, en C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\ia_terminal\:
 
   IaTerminal.csproj       proyecto .NET 8, self-contained win-x64
   icono.ico              icono multirresolución del portable (PARTE 18)
@@ -219,6 +251,20 @@ Variantes del método que resultaron protecciones efectivas:
    - BUFFER ANTI-FUGAS             → la cola del stream se retiene desde el
                                       último '[' para que ningún marcador, ni
                                       siquiera un fragmento, llegue a la pantalla.
+   - ARTEFACTO EN EL CHAT          → si el usuario pidió escribir y el modelo
+                                      DESPERTÓ el código en una respuesta en vez
+                                      de emitir el marcador, NO se imprime: se
+                                      descarta y se fuerza [[WRITE]] con su
+                                      propio borrador. Ver PARTE 21.
+
+*** EL 7B TIENE DOS FORMAS DE NO ACTUAR, Y HACE FALTA ATRAPAR LAS DOS. ***
+  1) MIENTE sobre la acción: "he creado el archivo", sin emitir [[WRITE]].
+     → la atrapa WriteClaimPattern (PARTE 10A).
+  2) SE NIEGA a actuar y le ENSEÑA el código al usuario: "abrí el archivo y
+     reemplazá el contenido" + el bloque completo en el chat. No afirma nada,
+     así que la forma 1 no la ve, y antes de la PARTE 21 NINGUNA trampa la
+     veía: la respuesta se imprimía tal cual, el archivo no se escribía y el
+     usuario tenía que pedirlo otra vez. Ver PARTE 21.
 
 ################################################################################
 # PARTE 4 — HERRAMIENTAS DEL AGENTE
@@ -244,7 +290,11 @@ Variantes del método que resultaron protecciones efectivas:
       Idempotencia: misma ruta + mismo turno → se bloquea el duplicado.
 
   [[NET]] consulta
-      Busca en DuckDuckGo HTML y, si falla, en Wikipedia (es).
+      Búsqueda POR INTENCIÓN (PARTE 22): el host clasifica la consulta antes de
+      catalogarla (dónde / clima / general) y enruta:
+        dónde  → Nominatim/OpenStreetMap (dirección real + coordenadas)
+        clima  → Open-Meteo (dato medido, no texto de página)
+        general→ Wikipedia (extracto) + DuckDuckGo (con contenido de la página ganadora)
       Autorización por sesión (NetAutoAllowed) o pregunta individual.
 
 Límites: 5 herramientas encadenadas por turno · 2 rondas de [[NET]] ·
@@ -297,7 +347,7 @@ HAY DOS config.json, UNO POR COPIA DEL PORTABLE
     IA 27 T\ia_terminal\publish\config.json   ← portable de desarrollo
 
   Los dos están alineados (reverificado 27/9 04:40):
-    modelo = C:\Users\nicot\OneDrive\Desktop\IA 27 T\modelos
+    modelo = C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\modelos
     ctx 8192 · threads 8 · max-tokens 1536 · timeout 300 s
     gpu-layers 0 · temp 0.7 · rp 1.1 · top-p 0.9 · chatml · cache f16/f16
 
@@ -331,7 +381,7 @@ Reglas implementadas en el código:
 
   Para ver los dos configs de un saque:
 
-    Get-ChildItem "C:\Users\nicot\OneDrive\Desktop\IA 27 T" -Recurse `
+    Get-ChildItem "C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T" -Recurse `
       -Filter config.json -Depth 2 |
       ForEach-Object { $j = Get-Content $_.FullName -Raw | ConvertFrom-Json
         "{0}  {1}  {2}/{3}/{4}/{5}" -f $_.Directory.Name, $j.ModelDirectory,
@@ -564,6 +614,49 @@ Personalidad de interfaz (fijada en el código):
   - Estética Cyberpunk: negro, cian, azul oscuro; prompts "tú>" e "IA27>".
   - Mensajes de sistema entre corchetes: [SISTEMA · ...], [herramienta: ...].
 
+  MOCKUP de la interfaz real (sesión interactiva, 27/9):
+
+    //============================== IR3C5.CORE ==============================//
+                     ####
+            ##       ####       ##
+             ####    #####    ####
+               #### ##### ####
+                 ##########
+        ##        ##########        ##
+          ####   ###########   ####
+            ###################
+       ################################
+            ###################
+          ####   ###########   ####
+        ##        ##########        ##
+                 ##########
+               #### ##### ####
+             ####    #####    ####
+            ##       ####       ##
+                     ####
+    //============================== ESTALINGRADO CORP ======================//
+      INTRA-NET :: IA27 TERMINAL :: sistema local // canal seguro
+      ------------------------------------------------------------------------
+      modelo  : Atenea-Omega-IB2.gguf
+      origen  : C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\modelos
+      motor   : llama.cpp local // net: on // internet bajo autorización
+      ------------------------------------------------------------------------
+      /help ayuda · /clear limpiar · /use <modelo> cambiar · /exit salir
+
+
+    Cargando el modelo; la primera carga puede tardar...
+    Listo. Escribe /help para ver los comandos del agente. Ctrl+C detiene la respuesta en curso.
+
+
+    [INTRANET] ¿Permitir que el agente busque en internet automáticamente en esta sesión? (s/n): s
+      Internet autorizado para esta sesión. El agente buscará automáticamente cuando necesite datos actuales.
+
+
+    tú> hola atenea
+    IA27>
+    [aún generando; Ctrl+C para detener. Para respuestas más cortas usa /tokens 512]
+    IA27> ¡Hola! ¿Cómo estás? Estoy aquí para ayudarte en lo que necesites. ¿En qué puedo asistirte hoy?
+
   OJO, no confundir: Atenea Omega Beta (IA-27) es el AGENTE que corre dentro
   del portable, en C#, sobre el modelo. opencode (P2) es el agente de CÓDIGO,
   que programa este proyecto. Son dos cosas distintas y no se mezclan.
@@ -706,6 +799,76 @@ en cualquier sesión de desarrollo. opencode las sigue (ver PARTE 2):
                                                    siguen con el mismo hash.
                                                    4,36 GB de más y el riesgo de
                                                    la P7. Ver P16 punto 2.
+ 29. El modelo enseñaba el código en el chat en vez de escribir el archivo
+                                                    → la anti-alucinación solo
+                                                   caza MENTIRAS (WriteClaimPattern),
+                                                   no la NEGATIVA a actuar. 4 turnos
+                                                   perdidos en la prueba de Fury³.
+                                                   Ver PARTE 21.
+ 30. Rutas con ESPACIO se truncaban en el espacio        → "C:\...\Desktop\IA" en vez de
+                                                   "C:\...\IA 27 T\...": [^\s"']+ no
+                                                   puede, y la carpeta del proyecto
+                                                   tiene espacio. Creó un archivo
+                                                   basura llamado "IA" en el
+                                                   Escritorio. Ver PARTE 21.
+ 31. Un [[END]] pegado a un [[READ]]/[[CMD]]           → el modelo cierra el marcador de
+                                                   lectura con el cierre que es
+                                                   OBLIGATORIO solo en [[WRITE]], y la
+                                                   ruta quedaba "...\index.html
+                                                   [[END]]", que no existe. Ver P21.
+ 32. Una escritura DENEGADA contaba como escrita      → writtenPaths marcaba la ruta igual,
+                                                   y el reintento se comía su propia
+                                                   guarda de "escritura duplicada" con
+                                                   un archivo que nunca se creó. Ver P21.
+ 33. El modelo metía el bloque cercado DENTRO del      → el archivo escrito arrancaba con
+     archivo                                        "```html". Red de contención en
+                                                   ExecuteWriteTool. Ver PARTE 21.
+ 34. Mudanza de carpeta = ruta muerta en los           → el proyecto se movió de
+     configs (P27 otra vez)                               Desktop\IA 27 T\ a
+                                                          Desktop\Estalingrado
+                                                          corp\proyectos\IA 27 T\
+                                                          y los 2 config.json siguieron
+                                                          apuntando a la ruta vieja.
+                                                          Misma trampa que P27 (el error
+                                                          NO se detecta solo: aparece
+                                                          recién cuando alguien usa el
+                                                          portable). Regla ampliada:
+                                                          revisar los config.json cada
+                                                          vez que cambie la topología de
+                                                          discos O de carpetas.
+ 35. "He creado una copia del chat... guardada como     → en la sesión
+     chat_copia.txt" pero NO se creó nada                    "ia 27 pruebas 27-08-26.txt"
+                                                          (IA27 CHATS\) el modelo redactó
+                                                          el historial en el chat y afirmó
+                                                          haberlo guardado, SIN emitir
+                                                          [[WRITE]]. Verificado: no existe
+                                                          chat_copia.txt en Fury³. Variante
+                                                          del WriteClaimPattern (P10A):
+                                                          además de "he creado el archivo"
+                                                          hay que cazar "guadado como
+                                                          <nombre>.txt" en modo
+                                                          memoria/historial. SIN FIX todavía.
+ 36. [[NET]] funciona, pero rellena los huecos          → chat "despensa localizar":
+     inventando datos                                     la búsqueda encontró datos de
+                                                          Despensa Nancy (zona sur de
+                                                          Salta, productos) y eso es el
+                                                          lado BUENO: localizó un almacén
+                                                          de barrio, que era justo la misión.
+                                                          El lado MALO: lo que la búsqueda
+                                                          no devolvió, el modelo lo rellenó:
+                                                          "[dirección actual]", "[Máxima
+                                                          actual]", horarios inventados, y
+                                                          hasta "Estalingrado Corp está en
+                                                          el corazón de Salta Capital".
+                                                          PlaceholderPathPattern caza rutas
+                                                          falsas, pero NO placeholders de
+                                                          DATOS ([dentro de corchetes]) ni
+                                                          afirmaciones de ubicación sin
+                                                          fuente. PENDIENTE: regla de que
+                                                          tras [[NET]] está prohibido
+                                                          inventar lo que el resultado no
+                                                          trajo (y/o trampa de placeholders
+                                                          de datos).
 
 ################################################################################
 # PARTE 16 — PRÓXIMOS PASOS SUGERIDOS (27/9 04:45)
@@ -748,8 +911,19 @@ LO QUE SIGUE PENDIENTE:
   11. Limpiar la raíz: quedan __pycache__ y, en la carpeta modelos/, atenea.py y
      los .md de la versión Python (P15 punto 26). Y ojo con esto: la carpeta
      modelos\ está dentro de OneDrive, así que OneDrive va a querer subir
-     4,36 GB del .gguf a la nube. Si eso no es lo que querés, mover el modelo
+     4,36 GB del .gguf a la      nube. Si eso no es lo que querés, mover el modelo
      fuera de la carpeta sincronizada y actualizar el config set model-dir.
+ 12. Trampa para claims de escritura tipo "guardado como <nombre>.txt" en
+     modo memoria/historial (variante de WriteClaimPattern). Incidente P15.35.
+ 13. Regla anti-relleno tras [[NET]]: prohibir inventar lo que el resultado
+     no trajo + trampa de placeholders de DATOS ([entre corchetes], no solo
+     rutas). Incidente P15.36.
+ 14. Decidir el esquema de entregas: el usuario actualizó `portable 0.2.exe`
+     con el código actual (PARTE 22) en vez de congelar una v0.3. ¿Se mantiene
+     ese esquema (una sola entrega viva que se sobrescribe, con hash anotado
+     cada vez) o se vuelve al esquema de versiones congeladas (0.3, 0.4…)?
+     Mientras tanto, `portable 0.2.exe` ES el código actual y el hash a
+     anotar es 7AEB42E9…63399.
 
 ################################################################################
 # PARTE 17 — ENTREGAS CONGELADAS POR VERSIÓN
@@ -770,18 +944,40 @@ Sirve para poder volver a una versión conocida que ya se probó buena.
            reconstruirla desde el commit 6b0d32c, que es el código anterior al
            fix de la P19.
 
-  v0.2  →  IA 27 T\portable 0.2.exe   ← ACTUAL
+  v0.2  →  IA 27 T\portable 0.2.exe   ← CONGELADA, PERO YA NO ES EL CÓDIGO ACTUAL
            68.772.898 bytes · 2026-09-27 03:34
            SHA-256 437F0212D68A331C28A29CB6F3835FC331D3FE8C8F6E27A80405245E27D044F5
            Montada y verificada el 2026-09-27 03:45.
            REVERIFICADA el 27/9 04:25 y de nuevo a las 04:40 tras cambiar la
-           carpeta del modelo:
+             carpeta del modelo:
              · listar → exit 0, encuentra Atenea-Omega-IB2.gguf 4.36 GB en
                IA 27 T\modelos\
              · config propio → 8192 / 8 / 1536 / 300 s (idéntico al del publish)
              · runtime\ al lado: 51 archivos, 44,86 MB, sin ggml-cuda (P12)
              · el hash coincide con el publish\portable.exe, o sea que LA v0.2
                ES EL CÓDIGO ACTUAL
+           ⚠ 27/9 06:xx: LA v0.2 QUEDÓ ATRASADA. El fix de la PARTE 21 (el
+           agente que enseña el código en vez de escribir) ya está en el publish
+           y el hash del publish pasó a ser
+               92026C0BB0394D4CAA81BC3FE0C7CB13BAB7B31762725F25DE567D579C8C68E8
+               68.785.186 bytes
+           o sea el método del punto 1 de la P17 funcionando: mismo código
+           publicado en la misma carpeta, hash DISTINTO ⇒ el código cambió.
+           La v0.2 congelada NO se tocó: sirve para volver a este estado, que
+           es el que falló en la prueba de Fury³. NO es la entrega buena.
+           Para una v0.3 hay que seguir el procedimiento de más abajo.
+           ⚠ 27/9 15:2x: LA v0.2 SE ACTUALIZÓ A PEDIDO DEL USUARIO. Ya no es la
+           entrega congelada de las 03:34: se la sobrescribió con el código actual
+           (búsqueda por intención, PARTE 22). Hash nuevo:
+               7AEB42E94A867F23666B7623F08C8016153C94AEC3A2DC724B8FA295FFE63399
+               68.797.474 bytes
+           El hash viejo (437F0212…D044F5) queda anotado arriba como HISTÓRICO: es
+           el .exe que se probó en la prueba de Fury³ y falló. Si algún día hay
+           que volver a ese estado, se reconstruye desde el commit anterior a la
+           PARTE 22. REGLA NUEVA: la entrega congelada se puede actualizar a
+           pedido del usuario, pero hay que anotar el cambio de hash y tamaño en
+           esta PARTE 17, y decirle al usuario que el hash anterior deja de
+           existir en disco.
            QUÉ CAMBIA RESPECTO DE LA v0.1 (todo de la PARTE 19):
              - Job Object: ya no quedan llama-server huérfanos aunque
                portable.exe muera de golpe (la v0.1 sí dejaba ~7 GB).
@@ -1060,6 +1256,192 @@ OPCIONES (cuando se decida)
 
   Mientras no se elija una, esto es una decisión pendiente, no un descuido.
 
-================================================================================
+################################################################################
+# PARTE 21 — EL AGENTE QUE ENSEÑA EL CÓDIGO EN VEZ DE ESCRIBIR (corregido)
+################################################################################
+
+SÍNTOMA (prueba de Fury³, 27/9): el usuario pidió "mejora el index que está acá
+C:\...\Fury³ y hacé que se parezca a google". El primer turno leyó el archivo y
+lo escribió bien. En los SIGUIENTES cuatro turnos el modelo no volvió a emitir
+[[WRITE]] nunca más: volcaba el HTML en el chat y le decía al usuario qué
+hacer. El usuario lo intentó con "puede hacerlo mejor", "tenés las herramientas
+hacelo vos" y el modelo siguió igual. El archivo nunca cambió.
+
+POR QUÉ NO LO ATRAPABA NADA
+  El loop (AskWithNetPermissionAsync) tiene cuatro compuertas para una
+  respuesta SIN marcador: límite de 5 herramientas · [[WRITE]] sin [[END]] ·
+  WriteClaimPattern/CmdClaimPattern · [[NET]]. El modelo no mentía: no decía
+  "he creado el archivo". Decía "acá te muestro cómo podrías modificarlo",
+  "abrí el archivo y reemplazá el contenido", "luego te guiaré". Ninguna de esas
+  frases matchea WriteClaimPattern, que solo busca afirmaciones falsas. Entonces
+  caía en el `return content` de la última compuerta: se imprimía, sin reintento
+  y sin escribir.
+
+  O sea: la anti-alucinación cazaba al que MIENTE, y no al que SE NIEGA A
+  ACTUAR. Son dos fallas distintas y hacía falta una trampa para cada una.
+
+LO QUE SE AGREGÓ
+  1) COMPUERTA "ARTEFACTO EN EL CHAT" (TerminalApplication).
+     Se dispara SOLO si se cumplen las tres cosas:
+       a) el usuario pidió escribir        → PromptRequestsWrite()
+       b) no se ejecutó ninguna escritura → !writeExecuted
+       c) hay firma de artefacto en el chat → LooksLikeArtifactInChat()
+     La firma (c) son DOS condiciones juntas, a propósito:
+       · FileArtifactPattern: un bloque cercado ``` con contenido de ARCHIVO
+         ENTERO (<!DOCTYPE, <html, <?xml, using System, #!/usr/bin, package,
+         import). Un snippet suelto NO cuenta.
+       · ManualInstructionPattern: la indicación de hacerlo a mano ("podés
+         pegar", "abrí el archivo", "reemplaza su contenido", "te guiaré").
+     Las dos juntas evitan interceptar una explicación normal de código: si el
+     usuario pregunta "¿qué hace esto?", el modelo muestra un ```css y NO se
+     toca nada. Verificado.
+     Cuando dispara: NO se imprime la respuesta, se descarta, y se le fuerza el
+     marcador REUTILIZANDO SU PROPIO BORRADOR (ExtractDraftFromChat), que se le
+     inyecta en el mensaje de sistema. Antes el modelo redactaba el archivo una
+     vez en el chat y tenía que escribirlo OTRA vez dentro del marcador: el
+     reintento salía al doble de tokens. Con el borrador, sale ~la mitad.
+
+  2) EL HOST LE DICE LA RUTA, Y EN QUÉ CARPETA.
+     ExplicitModifyIntent: verbo de acción sobre archivo ("mejorá", "actualizá",
+     "modificá", "cambiá", "rehacé", "arreglá", "optimizá"...) + RUTA REAL.
+     Antes solo existía ExplicitWriteIntent, que exige el verbo "crear" y el
+     nombre del archivo con artículo ("creame un txt en C:\..."). "mejora el
+     index que está en C:\..." no matcheaba, así que el host no le ordenaba
+     usar [[WRITE]] y lo dejaba libre: de ahí el volcado en el chat.
+     Las negaciones están EXCLUIDAS con lookbehind ("no modifiques...", "sin
+     escribir...", "nunca...") para no pedir una escritura que el usuario
+     prohibió. Y se exige ruta, así que "mejorale la ortografía a este
+     párrafo" NO matchea (no tiene ruta) y no dispara nada.
+
+  3) PromptRequestsWrite también reconoce la EXIGENCIA DE DELEGACIÓN.
+     "tenés las herramientas hacelo vos", "no me lo escribas acá", "usá las
+     herramientas" (DelegationDemandPattern). Es el caso del turno 3 de la
+     prueba: no trae ruta, pero el usuario está exigiendo que el modelo ACTÚE.
+     Sin esto, la compuerta nueva no habría tenido nada que esperar.
+
+LO QUE LA VERIFICACIÓN ENCONTRÓ (4 bugs, ninguno visible antes)
+  Estos NO se deducen por pensar, salieron de correr la prueba de verdad:
+
+  · RUTA TRUNCADA EN EL ESPACIO. Los patrones de ruta son [^\s"']+, así que
+    paran en el primer espacio. Y la carpeta del proyecto se llama "IA 27 T":
+    "C:\Users\nicot\OneDrive\Desktop\IA 27 T\pruebas\FuryTest" se leía como
+    "C:\Users\nicot\OneDrive\Desktop\IA". Dos arreglos:
+      - ExtractRealPathFromText: en el HOST, usa el DISCO como oráculo. Toma la
+        coincidencia más larga y la va recortando desde el último espacio hasta
+        que la ruta exista de verdad.
+      - RepairToolPathFromContext: en la ruta que escribió el MODELO, busca en
+        el propio mensaje la ruta más larga que empiece por lo que él puso y
+        que exista. Es lo que arregla el caso real: el modelo escribe
+        "[[WRITE]] C:\...\Desktop\IA" pero en el mismo mensaje dice la ruta
+        completa, y esa es la que gana.
+    SIN ESTO se creó un archivo basura llamado "IA" en el Escritorio del
+    usuario. Ya está borrado, pero la trampa ahora está en el código:
+    ExecuteWriteTool RECHAZA escribir si la ruta es una CARPETA, en vez de crear
+    un archivo con el nombre de la carpeta.
+
+  · [[END]] EN UN [[READ]]. El modelo a veces cierra el marcador de lectura con
+    el [[END]] que es obligatorio SOLO en [[WRITE]], y como el patrón de lectura
+    toma hasta el fin de línea, la ruta quedaba "...\index.html [[END]]", que
+    no existe. TrimStrayEndMarker lo saca.
+
+  · UNA ESCRITURA DENEGADA CONTABA COMO ESCRITA. El permiso denegado devuelve un
+    mensaje, no una excepción, así que el código marcaba la ruta en writtenPaths
+    igual. El reintento se comía su propia guarda de "escritura duplicada" con
+    un archivo que nunca se había creado, y el modelo se metía en un bucle de
+    "ya fue creado en este turno". ToolWasDenied() lo corrige.
+
+  · EL BLOQUE CERCADO DENTRO DEL ARCHIVO. Al inyectarle el borrador, el modelo
+    copiaba también las comillas triples y el archivo escrito arrancaba con
+    "```html". Ahora el mensaje dice explícitamente que las copie SIN las
+    comillas, ExtractDraftFromChat las saca del borrador, y ExecuteWriteTool
+    tiene una red de contención por si vuelve a pasar.
+
+LA PRUEBA, CON NÚMEROS
+  Se repitió la prueba de Fury³ sobre una COPIA en pruebas-tool\FuryTest (PARTE
+  4: nunca en la raíz, ni en la carpeta real del usuario):
+      · ANTES:  index.html 104 bytes, hash BB28E46F…30D7F25
+      · DESPUÉS: index.html 1057 bytes, hash 1F14C6CC…0334644124
+      · 0 interceptaciones necesarias, 1 escritura, 0 errores.
+    O sea que con la orden previa del host (punto 2) el modelo emitió [[WRITE]]
+    bien a la primera, con la ruta COMPLETA y con el nombre de archivo. La
+    compuerta nueva (punto 1) es la red de seguridad para cuando eso falla, y se
+    la vio disparar de verdad en una corrida anterior:
+      "[INTERCEPCIÓN] El modelo te enseñó el código en el chat en vez de
+       escribir el archivo. Forzando [[WRITE]] con su propio borrador..."
+    Y se vio que NO dispara cuando no debe: en una corrida donde el modelo
+    preguntó una pregunta en vez de volcar código, hubo 0 interceptaciones.
+
+  Limitación honesta: con --max-tokens 400 la prueba NO pasa, porque el modelo
+  agota los tokens antes de cerrar el [[END]] y el marcador queda incompleto. Con
+  los 1536 de la configuración (PARTE 12) entra. O sea que para escribir un
+  archivo largo en este modelo NO hay que bajar max-tokens.
+
+  Verificación final tras el cambio: doctor OK · listar OK (1 GGUF) ·
+  preguntar "hola" limpio · hash del modelo 65B8FCD9…AA1423 (intacto).
+
+TRAMPA DE REGRESIÓN
+  Todo esto se comprobó con el modelo real, no con "compiló". Y en el camino se
+  creó basura de verdad en el Escritorio del usuario. Si se toca algo de este
+  camino: probá con una copia en pruebas-tool\, MIRÁ que la carpeta quede sin
+  archivos raros, y borrala después.
+
+################################################################################
+# PARTE 22 — BÚSQUEDA POR INTENCIÓN (27/9, implementado y verificado)
+################################################################################
+
+MOTIVO: [[NET]] era "un solo motor": raspar DuckDuckGo HTML devolvía 3 TÍTULOS
+y snippets, nunca el contenido de la página. Con eso el modelo no podía decir
+dónde queda algo (chat "Alto Noa": respondió una lista de nombres de páginas
+web), y para el clima inventaba "[Máxima actual]". La "copiosidad" de las
+respuestas venía de ahí: el modelo repite lo único que le das.
+
+LO QUE CAMBIÓ (TerminalApplication.cs):
+  1) ClassifySearchIntent clasifica la query ANTES de buscar:
+       dónde   → LocationIntentPattern  (dónde, queda, dirección, ubicación...)
+       clima   → WeatherIntentPattern   (clima, temperatura, pronóstico, lluvia...)
+       resto   → General
+  2) Enrutado en SearchWebAsync:
+       dónde   → TryNominatimAsync: OpenStreetMap/Nominatim, dirección real +
+                 coordenadas + tipo de lugar. Si no hay resultado, cae a general.
+       clima   → TryOpenMeteoAsync: geocodifica el lugar en Nominatim y consulta
+                 api.open-meteo.com: T actual, sensación, humedad, viento y
+                 máx/mín/lluvia de hoy + 2 días. DATO MEDIDO, no texto de página.
+       general → TryWikipediaAsync (ahora con TryWikipediaExtractAsync: extracto
+                 en texto plano del primer artículo, exchars=1200) + TryDuckDuckGoAsync.
+  3) Fase 2 (página ganadora): TryDuckDuckGoAsync resuelve el primer href real
+     (decodifica el uddg= del redirect de DDG), lo descarga y agrega hasta 1600
+     caracteres de texto plano (sin script/style/header/footer). El modelo pasa
+     de leer títulos a leer contenido.
+
+REGLAS Y PRECIO DE ESTO:
+  - Guárrense las APIs: Nominatim y Open-Meteo son GRATIS y sin API key, pero el
+    User-Agent identificador ("IA27Terminal/1.0") es obligatorio para Nominatim.
+    No quitarlo del HttpClient (CreateWebClient).
+  - SESGO countrycodes=ar SOLO en la geocodificación del clima. Sin eso "salta"
+    matcheaba Salta Carnero, Ponferrada, ESPAÑA y el agente dio 19,8 °C con
+    tormenta. Verificado en prueba real. La búsqueda dónde-general queda sin
+    sesgo para no tapar consultas internacionales.
+  - CleanPlaceQuery saca los verbos de la intención ("donde queda", "clima en",
+    "cómo llego al") antes de geocodificar. Si aparecen nuevas formas ("de qué
+    lado queda"), agregarlas ahí, no en el geo-URL.
+  - Tamaño del contexto: cada motor recorta (~1200-1600 chars); el total del
+    mensaje de resultados entra sobrado en 8192. No agrandar sin medir (P12:
+    el prompt se come los tokens).
+
+VERIFICADO CON EL MODELO REAL (no con "compiló"), 27/9:
+  · "donde queda el shopping alto noa?" → "Av. del Bicentenario de la Batalla
+    de Salta 702, Salta, Argentina" (antes de este fix: una lista de títulos).
+  · "consulta el clima en salta" → Salta, Argentina: 37,9 °C ahora, máx. 37,9,
+    lluvia 100 % mañana. Datos reales (matchea el endpoint en PowerShell).
+  · doctor OK · listar OK · publish sin procesos huérfanos (Job Object de P19).
+  · Hash del nuevo publish\portable.exe:
+      7AEB42E94A867F23666B7623F08C8016153C94AEC3A2DC724B8FA295FFE63399
+
+PENDIENTE (misma saga, NO resuelto):
+  - El modelo sigue pudiendo inventar datos que la búsqueda no devolvió
+    (P15.36). La página ganadora y Open-Meteo lo reducen fuerte, pero la trampa
+    de "dato sin fuente" sigue siendo el punto abierto de PARTE 16.
+
+################################################################################
 FIN DEL DOCUMENTO — IA27 TERMINAL · ESTALINGRADO CORP · INTRA-NET
-================================================================================
+################################################################################

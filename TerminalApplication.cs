@@ -1171,29 +1171,166 @@ public sealed class TerminalApplication
     private static readonly Regex WriteClaimPattern = new(@"(?:he\s+creado|cre[ée]|ya\s+(?:cre[ée]|guard[ée])|acabo\s+de\s+crear)\s+(?:(?:un|una|el|la|este|esta)\s+)?(?:archivo|fichero|documento|txt|texto)|archivo\s+creado\s+en|qued[óo]\s+(?:guardado|creado)\s+en", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex CmdClaimPattern = new(@"(?:ejecut[ée]|corri[ée]|lanc[ée])\s+el\s+comando|el\s+comando\s+(?:se\s+ejecut[óo]|devolvi[óo]|mostr[óo])|resultado\s+del\s+comando", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    // ===== Compuerta "el modelo entregó el artefacto en el chat en vez de usar la herramienta" =====
+    // Un 7B tiene DOS formas de no actuar: mentir sobre la acción (WriteClaimPattern) y
+    // negarse a actuar, enseñando el código al usuario. Esta segunda no la cubría ninguna
+    // trampa: el modelo respondía "abrí el archivo y reemplazá el contenido" con el bloque
+    // completo en el chat, el loop no detectaba nada y devolvía la respuesta tal cual.
+    // Firma: un bloque cercado con contenido de ARCHIVO COMPLETO...
+    private static readonly Regex FileArtifactPattern = new(@"<!DOCTYPE|<html[\s>]|<!doctype|<\?xml|using\s+System|#!/usr|#!/bin|^\s*package\s+\w|^\s*import\s+\w+[\.;]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // ...más la indicación de que lo haga el usuario a mano.
+    private static readonly Regex ManualInstructionPattern = new(@"(?:pod[ée]s|puedes|podr[íi]as|deber[íi]as|ten[ée]s\s+que|tenes\s+que|hay\s+que|simplemente|entonces|as[íi])\s+[^.!?\r\n]{0,70}?\b(?:abrir|abris|abrí|reemplaz\w+|copi\w+|peg\w+|guard\w+|sobreescrib\w+|edit\w+|modific\w+|escrib\w+)\b|(?:abrir|abris|abrí|reemplaz\w+|copi\w+|peg\w+|guard\w+|escrib\w+)\s+(?:el\s+archivo|el\s+contenido|el\s+c[óo]digo|el\s+index|el\s+documento|la\s+carpeta|su\s+contenido)|te\s+guiar[ée]|te\s+muestro\s+c[óo]mo|aqu[íi]\s+te\s+muestro\s+c[óo]mo|podr[íi]as\s+(?:modificar|reemplazar|cambiar)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // El usuario exige que use las herramientas en vez de darle el código ("tienes las herramientas hazlo tu").
+    private static readonly Regex DelegationDemandPattern = new(@"\b(?:ten[ée]s\s+las\s+herramientas|us[áa]\s+las\s+herramientas|(?:hay|ten[ée]s)\s+herramientas|(?:hac[eé]|hag[áa]|resolvelo|arreglalo|guardalo|escribilo|copialo|modificalo|reemplazalo)\s+(?:t[úu]|vos|usted|directamente)|no\s+(?:me\s+)?lo\s+(?:escribas|digas|muestres|expliques)|(?:escrib[ií]lo|guardalo|modificalo|copialo|resolvelo|hacelo|escribilo)\s+(?:vos|t[úu]|directly)|no\s+lo\s+escribas\s+ac[aá]|en\s+vez\s+de\s+(?:decirme|mostrarme|escribirme|ense[ñn]arme))", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // Borrador del modelo, para reusarlo en el reintento en vez de pedirlo de nuevo.
+    private static readonly Regex CodeFencePattern = new(@"```[^\r\n`]*\r?\n(?<body>[\s\S]*?)\r?\n?```", RegexOptions.Compiled);
+
     private sealed record ToolRequest(string Kind, string Argument, string? Body);
+
+    /// <summary>
+    /// ¿El usuario denegó el permiso? Si se contara como "herramienta ejecutada", el modelo que
+    /// reintenta después de una negativa se encontraría con la guarda de escritura duplicada y un
+    /// bucle de "ya fue creado en este turno" sobre un archivo que en realidad nunca se escribió.
+    /// </summary>
+    private static bool ToolWasDenied(string context) =>
+        context.StartsWith("[SISTEMA · el usuario denegó", StringComparison.Ordinal);
 
     private static ToolRequest? MatchToolRequest(string content)
     {
         var writeMatch = WriteRequestPattern.Match(content);
         if (writeMatch.Success)
         {
-            return new ToolRequest("WRITE", writeMatch.Groups["path"].Value.Trim().Trim('"'), writeMatch.Groups["body"].Value);
+            return new ToolRequest("WRITE", RepairToolPathFromContext(TrimStrayEndMarker(writeMatch.Groups["path"].Value).Trim().Trim('"'), content), writeMatch.Groups["body"].Value);
         }
 
         var cmdMatch = CmdRequestPattern.Match(content);
         if (cmdMatch.Success)
         {
-            return new ToolRequest("CMD", cmdMatch.Groups["cmd"].Value.Trim().Trim('"'), null);
+            return new ToolRequest("CMD", TrimStrayEndMarker(cmdMatch.Groups["cmd"].Value).Trim().Trim('"'), null);
         }
 
         var readMatch = ReadRequestPattern.Match(content);
         if (readMatch.Success)
         {
-            return new ToolRequest("READ", readMatch.Groups["path"].Value.Trim().Trim('"'), null);
+            return new ToolRequest("READ", RepairToolPathFromContext(TrimStrayEndMarker(readMatch.Groups["path"].Value).Trim().Trim('"'), content), null);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Repara la ruta que el modelo escribió en el marcador cuando la truncó en un espacio.
+    /// "C:\Users\nicot\OneDrive\Desktop\IA" en vez de "C:\Users\nicot\OneDrive\Desktop\IA 27 T\...":
+    /// la carpeta del proyecto tiene espacio, el modelo no lo respetó y el archivo se creaba en un
+    /// lugar equivocado (o, peor, en un archivo basura llamado "IA"). Se busca en el PROPIO mensaje
+    /// la ruta más larga que empiece por lo que el modelo puso y que exista de verdad en el disco.
+    /// </summary>
+    private static string RepairToolPathFromContext(string modelPath, string content)
+    {
+        if (modelPath.Length == 0 || LooksLikeExistingPath(modelPath))
+        {
+            return modelPath;
+        }
+
+        var best = modelPath;
+        foreach (Match candidate in ExplicitAbsolutePathPattern.Matches(content))
+        {
+            var text = candidate.Value.Trim().Trim('"', '\'', ',', ';').TrimEnd('.', ',');
+            if (text.Length <= best.Length)
+            {
+                continue;
+            }
+
+            if (!text.StartsWith(modelPath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (LooksLikeExistingPath(text))
+            {
+                best = text;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// El modelo a veces cierra un [[READ]] o un [[CMD]] con [[END]], que es el cierre OBLIGATORIO
+    /// solo de [[WRITE]]. Como el patrón de lectura toma todo hasta el fin de línea, ese [[END]]
+    /// se quedaba pegado a la ruta y el archivo no existía ("...\index.html [[END]]").
+    /// </summary>
+    private static string TrimStrayEndMarker(string value) =>
+        value.Replace("[[END]]", string.Empty, StringComparison.Ordinal).TrimEnd();
+
+    /// <summary>
+    /// ¿El modelo entregó el artefacto en el chat en vez de emitir el marcador?
+    /// Un 7B no solo miente sobre lo que hizo: también se niega a actuar y le enseña el código al
+    /// usuario ("abrí el archivo y reemplazá el contenido"). Eso no lo cubría ninguna trampa, porque
+    /// WriteClaimPattern solo busca afirmaciones falsas. Se exige la FIRMA COMPLETA: bloque cercado con
+    /// contenido de archivo entero (FileArtifactPattern) Y una indicación de hacerlo a mano
+    /// (ManualInstructionPattern). Las dos juntas, para no interceptar una explicación normal de código.
+    /// </summary>
+    private static bool LooksLikeArtifactInChat(string content)
+    {
+        if (content.IndexOf("```", StringComparison.Ordinal) < 0)
+        {
+            return false;
+        }
+
+        return FileArtifactPattern.IsMatch(content) && ManualInstructionPattern.IsMatch(content);
+    }
+
+    /// <summary>
+    /// Borrador del modelo (el bloque cercado más largo), para reusarlo en el reintento en vez de
+    /// pedirle que lo vuelva a redactar. Sin esto el reintento cuesta el doble de tokens: el modelo
+    /// ya escribió el contenido una vez y después tiene que escribirlo otra vez dentro del marcador.
+    /// </summary>
+    private static string ExtractDraftFromChat(string content)
+    {
+        var best = string.Empty;
+        foreach (Match fence in CodeFencePattern.Matches(content))
+        {
+            var body = fence.Groups["body"].Value.Trim();
+            if (body.Length > best.Length)
+            {
+                best = body;
+            }
+        }
+
+        // Sacar las comillas triples del borde: si el modelo las copia tal cual dentro de [[WRITE]],
+        // el archivo escrito arranca con "```html", que no es el archivo que el usuario pidió.
+        if (best.StartsWith("```", StringComparison.Ordinal))
+        {
+            best = best[3..].TrimStart();
+        }
+
+        if (best.EndsWith("```", StringComparison.Ordinal))
+        {
+            best = best[..^3].TrimEnd();
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// ¿El usuario pidió escribir un archivo? Se combina la extracción explícita (que ya cubre
+    /// "creame un txt en C:\...") con la intención de modificación y con la exigencia de delegación
+    /// ("tienes las herramientas, hazlo vos"), que no traen ruta pero sí exigen que el modelo actúe.
+    /// </summary>
+    private bool PromptRequestsWrite(string prompt)
+    {
+        if (TryExtractExplicitTool(prompt, out var tool) && tool.Kind == "WRITE")
+        {
+            return true;
+        }
+
+        if (DelegationDemandPattern.IsMatch(prompt))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static string StripToolMarkers(string content)
@@ -1238,6 +1375,62 @@ public sealed class TerminalApplication
         }
 
         return path;
+    }
+
+    /// <summary>
+    /// Saca la ruta REAL de un texto usando el disco como oráculo. Los patrones de ruta Based en
+    /// [^\s"']+ cortan en el primer espacio, y acá eso es un problema real: la carpeta del proyecto
+    /// se llama "IA 27 T", así que "mejora el index que está en C:\...\IA 27 T\pruebas\FuryTest"
+    /// se truncaba a "C:\Users\nicot\OneDrive\Desktop\IA" y se escribía el archivo en el lugar
+    /// equivocado. Se toma la coincidencia más larga y se va recortando desde el último espacio hasta
+    /// que la ruta exista de verdad. Si nada existe, se devuelve la coincidencia original.
+    /// </summary>
+    private static string ExtractRealPathFromText(string text)
+    {
+        var match = ExplicitAbsolutePathPattern.Match(text);
+        if (!match.Success)
+        {
+            match = ExplicitPathPattern.Match(text);
+            if (!match.Success)
+            {
+                return string.Empty;
+            }
+        }
+
+        var candidate = match.Value.Trim().Trim('"', '\'', ',', ';').TrimEnd('.', ',');
+        if (LooksLikeExistingPath(candidate))
+        {
+            return candidate;
+        }
+
+        // Recortar desde el último espacio: "C:\...\IA 27 T\pruebas\FuryTest y haz que" → candidatos más cortos.
+        for (var cut = candidate.LastIndexOf(' '); cut > 0; cut = candidate.LastIndexOf(' ', cut - 1))
+        {
+            var shorter = candidate[..cut].TrimEnd();
+            if (shorter.Length > 0 && LooksLikeExistingPath(shorter))
+            {
+                return shorter;
+            }
+        }
+
+        return candidate;
+    }
+
+    private static bool LooksLikeExistingPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length < 3 || !LooksLikePath(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            return File.Exists(path) || Directory.Exists(path);
+        }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException or IOException)
+        {
+            return false;
+        }
     }
 
     private static string ExecuteReadTool(string rawPath)
@@ -1346,13 +1539,39 @@ public sealed class TerminalApplication
     private static string ExecuteWriteTool(string rawPath, string body)
     {
         var path = ResolveToolPath(rawPath);
+
+        // Si la ruta es una CARPETA, no se crea un archivo con el nombre de la carpeta. Así pasó con
+        // una ruta truncada en un espacio: el modelo pidió "...\IA" y se creó un archivo basura "IA".
+        if (Directory.Exists(path))
+        {
+            throw new TerminalException($"Esa ruta es una CARPETA, no un archivo: \"{path}\". Reemití [[WRITE]] con la ruta INCLUDING el nombre del archivo (por ejemplo \"{Path.Combine(path, "index.html")}\"). No se escribió nada.");        }
+
         var parent = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(parent))
         {
             Directory.CreateDirectory(parent);
         }
 
-        File.WriteAllText(path, body, new UTF8Encoding(false));
+        // Red de contención: si el modelo metió el contenido dentro de un bloque cercado, el archivo
+        // NO debe arrancar con "```html". Es un error del modelo, no del pedido del usuario.
+        var content = body;
+        var fenceHead = content.IndexOf("```", StringComparison.Ordinal);
+        if (fenceHead == 0)
+        {
+            var firstNewLine = content.IndexOf('\n');
+            if (firstNewLine > 0)
+            {
+                content = content[(firstNewLine + 1)..];
+            }
+
+            var fenceTail = content.LastIndexOf("```", StringComparison.Ordinal);
+            if (fenceTail >= 0)
+            {
+                content = content[..fenceTail].TrimEnd();
+            }
+        }
+
+        File.WriteAllText(path, content, new UTF8Encoding(false));
         return $"Archivo escrito: {path} ({new FileInfo(path).Length:N0} bytes).";
     }
 
@@ -1451,7 +1670,16 @@ public sealed class TerminalApplication
     private static readonly Regex ExplicitReadIntent = new(@"^\s*(?:lee|l[ée]eme|leer|abr[íi]|mostr[áa](?:me)?|muestra|revisa|analiza|resum[íi])\s+(?:(?:el|la|los|las|este|esta|un|una)\s+)?(?:archivo|fichero|carpeta|carpepeta|directorio|contenido\s+de)\s*:?\s*(?<path>.+?)\s*[.!?]*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex ExplicitCmdIntent = new(@"^\s*(?:ejecuta(?:me)?|ejecutar|corre(?:me)?|correr|lanza(?:r)?)\s+(?:el\s+comando\s+)?(?<cmd>.+?)\s*[.!?]*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex ExplicitWriteIntent = new(@"^\s*(?:(?:si|dale|ahora|bueno|ok|y)\s+)?(?:crea(?:me|nos)?|crear|escribe(?:me|nos)?|escribir|genera(?:me|nos)?|guarda(?:me|nos)?)\s+(?:(?:un|una|el|la|este|esta)\s+)?(?:archivo|fichero|txt|texto|tecto|nota|documento)\b(?<rest>[\s\S]*)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // "mejora el index que está en C:\...", "actualiza el index.html de C:\...", "modificá el documento X".
+    // El verbo NO es "crear" y el nombre del archivo no viene con artículo ni palabra clave, así que
+    // ExplicitWriteIntent no matchea y el host no le ordenaba usar [[WRITE]]: el modelo se quedaba libre
+    // y volcaba el código en el chat. Se exige verbo de acción sobre archivo + RUTA REAL, y se excluyen
+    // las negaciones ("no modifiques...", "sin escribir...") para no pedir una escritura que el usuario prohibió.
+    private static readonly Regex ExplicitModifyIntent = new(@"(?<!no\s)(?<!no me\s)(?<!nunca\s)(?<!sin\s)(?<!jam[áa]s\s)(?<!evita(?:r)?\s)(?<!despu[ée]s\s)(?:crea(?:me|nos)?|crear|escribe(?:me|nos)?|escribir|genera(?:me|nos)?|guarda(?:me|nos)?|generar|mejora(?:r)?|actualiza(?:r)?|modific(?:a|ar|á)|cambi(?:a|ar|á)|reescrib(?:e|er)|rehac(?:e|er)|arregl(?:a|ar)|sobreescrib(?:e|er)|optimi[zsa](?:r|ar))(?![a-záéíóúñ])", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex ExplicitPathPattern = new(@"(?:[A-Za-z]:[\\/][^\s""']+|[^\s""'/\\]+\.\w{1,8})", RegexOptions.Compiled);
+    // Ruta absoluta, para preferirla sobre un nombre de archivo suelto que aparezca antes en el texto
+    // ("actualiza el index.html de C:\proj\app" → C:\proj\app, no index.html).
+    private static readonly Regex ExplicitAbsolutePathPattern = new(@"[A-Za-z]:[\\/][^\s""']+", RegexOptions.Compiled);
     private static readonly Regex ExplicitBodyPattern = new(@"(?:con\s+(?:el\s+)?(?:contenido|texto|t[íi]tulo)|que\s+(?:diga|contenga|tenga|sea))\s*:?\s*(?<body>[\s\S]+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex ExplicitNamePattern = new(@"t[íi]tulo\s+(?<name>[\w.\-]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex ContextReferenceBody = new(@"^\s*(?:(?:con\s+)?(?:to[dw]a\s+)?(?:esta|la)\s+(?:data|info(?:rmaci[oó]n)?)|esto|eso|este\s+texto|ese\s+texto|este\s+contenido|lo\s+(?:anterior|de\s+antes|mencionado|que\s+(?:hablamos|vimos|escribiste)))\s*[.!]*\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -1537,6 +1765,22 @@ public sealed class TerminalApplication
                 }
 
                 tool = new ToolRequest("WRITE", path, body);
+                return true;
+            }
+        }
+
+        // "mejora el index que está en C:\..." / "actualiza el index.html de C:\proj\app":
+        // verbo de acción sobre un archivo + ruta real, pero sin el verbo "crear" ni el nombre con
+        // artículo que exige ExplicitWriteIntent. Antes esto no matcheaba, el host no le ordenaba usar
+        // [[WRITE]] y el modelo volcaba el código en el chat (ver compuerta "artefacto en el chat").
+        // Cuerpo null a propósito: el usuario no dio el contenido literal, así que el host inyecta la
+        // orden de emitir [[WRITE]] usando la conversación como fuente del contenido.
+        if (ExplicitModifyIntent.IsMatch(prompt))
+        {
+            var candidate = ExtractRealPathFromText(prompt);
+            if (candidate.Length > 0 && LooksLikePath(candidate))
+            {
+                tool = new ToolRequest("WRITE", candidate, null);
                 return true;
             }
         }
@@ -1628,19 +1872,22 @@ public sealed class TerminalApplication
             {
                 // El usuario pidió crear el archivo pero no dio el contenido literal
                 // (ej. "con toda esta data"): ordenar al modelo emitir [[WRITE]] usando el contexto.
-                session.AddContextMessage($"[SISTEMA · el usuario pidió explícitamente crear un archivo]\nRuta indicada: \"{explicitTool.Argument}\". El contenido debe basarse en la conversación anterior. Tu respuesta debe EMPEZAR EXACTAMENTE por [[WRITE]] {explicitTool.Argument} :: <contenido completo> y TERMINAR con [[END]]. No afirmes que lo creaste: el sistema lo hará tras el permiso del usuario y te confirmará.");
+                var targetHint = Directory.Exists(ResolveToolPath(explicitTool.Argument))
+                    ? $"La ruta indicada es una CARPETA: \"{explicitTool.Argument}\". Elegí vos el archivo de esa carpeta que pidió el usuario (si habló de \"el index\", es \"{Path.Combine(ResolveToolPath(explicitTool.Argument), "index.html")}\") y poné ESA ruta completa en el marcador."
+                    : $"Ruta indicada: \"{explicitTool.Argument}\".";
+                session.AddContextMessage($"[SISTEMA · el usuario pidió explícitamente crear un archivo]\n{targetHint} El contenido debe basarse en la conversación anterior. Tu respuesta debe EMPEZAR EXACTAMENTE por [[WRITE]] <ruta completa INCLUDING el nombre del archivo> :: <contenido completo> y TERMINAR con [[END]]. No expliques el código en el chat, no lo muestres aparte y no afirmes que lo creaste: el sistema lo hará tras el permiso del usuario y te confirmará.");
             }
             else
             {
                 try
                 {
                     var explicitResult = await ExecuteToolWithPermissionAsync(explicitTool, explicitByUser: true, cancellationToken);
-                    if (explicitTool.Kind == "WRITE")
+                    if (explicitTool.Kind == "WRITE" && !ToolWasDenied(explicitResult))
                     {
                         pendingWriteExecuted = true;
                         writtenPaths.Add(ResolveToolPath(explicitTool.Argument));
                     }
-                    if (explicitTool.Kind == "CMD") { pendingCmdExecuted = true; }
+                    if (explicitTool.Kind == "CMD" && !ToolWasDenied(explicitResult)) { pendingCmdExecuted = true; }
                     session.AddContextMessage(explicitResult + $"\nPedido original del usuario: \"{prompt}\"");
                     Console.WriteLine();
                     Console.ForegroundColor = ConsoleColor.DarkBlue;
@@ -1714,12 +1961,12 @@ public sealed class TerminalApplication
                     try
                     {
                         toolContext = await ExecuteToolWithPermissionAsync(toolRequest, explicitByUser: false, cancellationToken);
-                        if (toolRequest.Kind == "WRITE" && resolvedWritePath is not null)
+                        if (toolRequest.Kind == "WRITE" && resolvedWritePath is not null && !ToolWasDenied(toolContext))
                         {
                             writeExecuted = true;
                             writtenPaths.Add(resolvedWritePath);
                         }
-                        if (toolRequest.Kind == "CMD") { cmdExecuted = true; }
+                        if (toolRequest.Kind == "CMD" && !ToolWasDenied(toolContext)) { cmdExecuted = true; }
                     }
                     catch (TerminalException toolError)
                     {
@@ -1783,12 +2030,59 @@ public sealed class TerminalApplication
                     ? "afirmaste haber creado/guardado un archivo, pero NO emitiste el marcador [[WRITE]]: el archivo NO existe"
                     : "afirmaste haber ejecutado un comando, pero NO emitiste el marcador [[CMD]]: el comando NO se ejecutó";
                 var claimMarker = falseWriteClaim
-                    ? "Tu respuesta debe EMPEZAR EXACTAMENTE por [[WRITE]] <ruta> :: <contenido completo> y TERMINAR con [[END]]. Usa el contenido que ya redactaste en la conversación."
+                    ? "Tu respuesta debe EMPEZAR EXACTAMENTE por [[WRITE]] <ruta> :: <contenido completo> y TERMINAR con [[END]]. Reutilizá el contenido que ya redactaste, que te lo devuelvo abajo."
                     : "Tu respuesta debe EMPEZAR EXACTAMENTE por [[CMD]] <comando>. El sistema pedirá permiso al usuario y luego lo ejecuta.";
-                session.AddContextMessage($"[SISTEMA · afirmación falsa interceptada]\nEn tu respuesta anterior {claimKind}. {claimMarker} No vuelvas a afirmar la acción: el sistema la ejecutará y te confirmará con un mensaje.");
+                var claimDraft = falseWriteClaim ? ExtractDraftFromChat(content) : string.Empty;
+                session.AddContextMessage($"[SISTEMA · afirmación falsa interceptada]\nEn tu respuesta anterior {claimKind}. {claimMarker} No vuelvas a afirmar la acción: el sistema la ejecutará y te confirmará con un mensaje." + (claimDraft.Length > 0 ? $"\n\n[BORRADOR A REUTILIZAR — copialo entre \":: \" y [[END]] EXACTAMENTE como está, sin las comillas triples (```) que lo delimitan:\n{claimDraft}]" : string.Empty));
                 Console.WriteLine();
                 Console.ForegroundColor = ConsoleColor.Yellow;
                 Console.WriteLine($"[INTERCEPCIÓN] El modelo afirmó haber {(falseWriteClaim ? "creado un archivo" : "ejecutado un comando")} sin usar herramientas. Forzando reintento con marcador...");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.ForegroundColor = ConsoleColor.DarkBlue;
+                Console.Write("IA27> ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                content = await session.AskContinueAsync(bufferedToken, cancellationToken);
+                continue;
+            }
+
+            // El usuario pidió escribir un archivo y el modelo entregó el artefacto en el chat
+            // (bloque de código + "abrí el archivo y reemplazá el contenido") en vez de emitir
+            // [[WRITE]]. Es la segunda forma de no actuar, distinta de mentir: WriteClaimPattern no
+            // matchea porque el modelo no afirma nada, así que antes la respuesta se imprimía tal
+            // cual, el archivo no se escribía y el usuario tenía que pedirlo otra vez (y otra vez).
+            // Acá no se imprime: se descarta y se fuerza el marcador reutilizando el borrador.
+            if (!writeExecuted && LooksLikeArtifactInChat(content) && PromptRequestsWrite(originalPrompt))
+            {
+                if (claimRetries >= 2)
+                {
+                    await FlushBufferAsync();
+                    return content + "\n\n[AVISO] Se agotaron los reintentos automáticos: el modelo no emitió el marcador [[WRITE]] y el archivo NO se modificó. Reintentá el pedido con /tokens 512.";
+                }
+
+                claimRetries++;
+                DiscardBuffer();
+                session.ReplaceLastAssistant(string.Empty);
+                var draft = ExtractDraftFromChat(content);
+                var targetPath = TryExtractExplicitTool(originalPrompt, out var pendingTool) && pendingTool.Kind == "WRITE"
+                    ? pendingTool.Argument
+                    : (lastToolPath ?? string.Empty);
+                var target = targetPath.Length > 0 ? ResolveToolPath(targetPath) : string.Empty;
+                var targetLine = target.Length > 0
+                    ? $"Ruta a escribir: \"{target}\".\n"
+                    : "Usá la ruta real del archivo que pidió el usuario (aparece en su mensaje).\n";
+                var draftBlock = draft.Length > 0
+                    ? $"\n\n[BORRADOR A REUTILIZAR — copialo entre \":: \" y [[END]] EXACTAMENTE como está, sin las comillas triples (```) que lo delimitan, sin agregar nada y sin comentarlo:]\n{draft}"
+                    : "\n\nNo redactes una explicación ni le pidas permiso al usuario: emití el marcador.";
+                session.AddContextMessage(
+                    "[SISTEMA · artefacto entregado en el chat en vez de usar la herramienta]\n" +
+                    $"En tu respuesta anterior MOSTRASTE el código en el chat y le indicaste al usuario que lo haga a mano, pero NO emitiste el marcador [[WRITE]]: el archivo NO se modificó.\n" +
+                    targetLine +
+                    "Tu respuesta debe EMPEZAR EXACTAMENTE por [[WRITE]] <ruta> :: <contenido completo> y TERMINAR con [[END]]. No expliques, no digas \"podés reemplazarlo\", no muestres el código aparte.\n" +
+                    "No afirmes que creaste nada: el sistema pide permiso al usuario, escribe el archivo y te confirma con un mensaje." +
+                    draftBlock);
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("[INTERCEPCIÓN] El modelo te enseñó el código en el chat en vez de escribir el archivo. Forzando [[WRITE]] con su propio borrador...");
                 Console.ForegroundColor = ConsoleColor.Cyan;
                 Console.ForegroundColor = ConsoleColor.DarkBlue;
                 Console.Write("IA27> ");
@@ -1919,15 +2213,54 @@ public sealed class TerminalApplication
         return allowed;
     }
 
-    private static async Task<string?> SearchWebAsync(string query, CancellationToken cancellationToken)
+    private static readonly Regex LocationIntentPattern = new(@"\b(d[óo]nde|direcci[óo]n|ubicaci[óo]n|ubicad[oa]s?|queda|quedan|c[óo]mo\s+lleg[oa]r?|mapa\s+de)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex WeatherIntentPattern = new(@"\b(clima|temperatura|pron[óo]stico|lluvia|llover[aá]?|va\s+a\s+llover|el\s+tiempo\s+(?:en|de)|c[óo]mo\s+est[áa]\s+el\s+tiempo)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private enum WebSearchIntent { General, Location, Weather }
+
+    private static WebSearchIntent ClassifySearchIntent(string query)
     {
-        var ddg = await TryDuckDuckGoAsync(query, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(ddg))
+        if (WeatherIntentPattern.IsMatch(query))
         {
-            return ddg;
+            return WebSearchIntent.Weather;
         }
 
-        return await TryWikipediaAsync(query, cancellationToken);
+        return LocationIntentPattern.IsMatch(query) ? WebSearchIntent.Location : WebSearchIntent.General;
+    }
+
+    // [[NET]] por intención: dónde → Nominatim/OpenStreetMap; clima → Open-Meteo;
+    // general → Wikipedia (extracto) + DuckDuckGo con el texto de la página ganadora.
+    private static async Task<string?> SearchWebAsync(string query, CancellationToken cancellationToken)
+    {
+        var intent = ClassifySearchIntent(query);
+
+        if (intent == WebSearchIntent.Weather)
+        {
+            var weather = await TryOpenMeteoAsync(query, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(weather))
+            {
+                return weather;
+            }
+        }
+
+        if (intent == WebSearchIntent.Location)
+        {
+            var place = await TryNominatimAsync(query, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(place))
+            {
+                return place;
+            }
+        }
+
+        var wiki = await TryWikipediaAsync(query, cancellationToken);
+        var ddg = await TryDuckDuckGoAsync(query, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(wiki) && !string.IsNullOrWhiteSpace(ddg))
+        {
+            return wiki + "\n\n" + ddg;
+        }
+
+        return !string.IsNullOrWhiteSpace(ddg) ? ddg : wiki;
     }
 
     private static async Task<string?> TryDuckDuckGoAsync(string query, CancellationToken cancellationToken)
@@ -1950,6 +2283,8 @@ public sealed class TerminalApplication
             var snippetMatches = Regex.Matches(html, "<a[^>]*class=\"result__snippet\"[^>]*>(.*?)</a>", RegexOptions.Singleline);
             var builder = new StringBuilder();
             var count = 0;
+            string? firstTitle = null;
+            string? firstUrl = null;
             for (var index = 0; index < linkMatches.Count && count < 3; index++)
             {
                 var title = StripHtml(linkMatches[index].Groups[2].Value);
@@ -1959,6 +2294,8 @@ public sealed class TerminalApplication
                 }
 
                 count++;
+                firstTitle ??= title;
+                firstUrl ??= ResolveDuckDuckGoUrl(linkMatches[index].Groups[1].Value);
                 builder.AppendLine($"{count}. {title}");
                 if (index < snippetMatches.Count)
                 {
@@ -1970,7 +2307,25 @@ public sealed class TerminalApplication
                 }
             }
 
-            return count > 0 ? builder.ToString().TrimEnd() : null;
+            if (count == 0)
+            {
+                return null;
+            }
+
+            // Fase 2: descargar el primer resultado y pasarle al modelo texto plano,
+            // no solo el título. Es lo que convierte una lista de links en contenido.
+            if (firstUrl is not null)
+            {
+                var pageText = await TryFetchPageTextAsync(firstUrl, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(pageText) && pageText.Length > 120)
+                {
+                    builder.AppendLine();
+                    builder.AppendLine($"Contenido de la página principal ({firstTitle}):");
+                    builder.AppendLine(pageText);
+                }
+            }
+
+            return builder.ToString().TrimEnd();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1992,11 +2347,17 @@ public sealed class TerminalApplication
             var items = document.RootElement.GetProperty("query").GetProperty("search");
             var builder = new StringBuilder();
             var count = 0;
+            string? firstTitle = null;
             foreach (var item in items.EnumerateArray())
             {
                 count++;
                 var title = item.GetProperty("title").GetString() ?? string.Empty;
                 var snippet = StripHtml(item.GetProperty("snippet").GetString() ?? string.Empty);
+                if (count == 1 && title.Length > 0)
+                {
+                    firstTitle = title;
+                }
+
                 builder.AppendLine($"{count}. Wikipedia: {title}");
                 if (snippet.Length > 0)
                 {
@@ -2004,13 +2365,216 @@ public sealed class TerminalApplication
                 }
             }
 
-            return count > 0 ? builder.ToString().TrimEnd() : null;
+            if (count == 0)
+            {
+                return null;
+            }
+
+            // Extracto en texto plano del primer artículo: contenido real, no solo snippet.
+            if (firstTitle is not null)
+            {
+                var extract = await TryWikipediaExtractAsync(firstTitle, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(extract))
+                {
+                    builder.AppendLine();
+                    builder.AppendLine($"Extracto del artículo \"{firstTitle}\":");
+                    builder.AppendLine(extract);
+                }
+            }
+
+            return builder.ToString().TrimEnd();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException or NotSupportedException or JsonException or KeyNotFoundException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static string CleanPlaceQuery(string query)
+    {
+        var value = Regex.Replace(query, @"^\s*(?:d[óo]nde\s+(?:queda|quedan|est[áa]|se\s+encuentran?|hay)|direcci[óo]n\s+(?:del?\s+|de\s+)?|ubicaci[óo]n\s+(?:del?\s+|de\s+)?|c[óo]mo\s+lleg[oa]r?\s+(?:al\s+|a\s+|hasta\s+)?|buscar?\s+informaci[óo]n\s+sobre\s+)", string.Empty, RegexOptions.IgnoreCase);
+        value = Regex.Replace(value, @"[?\s]+$", string.Empty).Trim();
+        return value.Length >= 3 ? value : query.Trim();
+    }
+
+    private static string? ResolveDuckDuckGoUrl(string href)
+    {
+        var decoded = WebUtility.HtmlDecode(href).Trim('"', '\'');
+        if (decoded.StartsWith("//", StringComparison.Ordinal))
+        {
+            decoded = "https:" + decoded;
+        }
+
+        var uddg = Regex.Match(decoded, @"[?&]uddg=([^&]+)");
+        if (uddg.Success)
+        {
+            decoded = Uri.UnescapeDataString(uddg.Groups[1].Value);
+        }
+
+        return decoded.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || decoded.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            ? decoded
+            : null;
+    }
+
+    private static async Task<string?> TryFetchPageTextAsync(string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var html = await WebClient.GetStringAsync(url, cancellationToken);
+            html = Regex.Replace(html, @"(?is)<(script|style|noscript|svg|header|footer|nav)\b[^>]*>.*?</\1>", " ");
+            var text = StripHtml(html);
+            const int max = 1600;
+            return text.Length > max ? text.Substring(0, max) + "…" : text;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException or NotSupportedException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<string?> TryWikipediaExtractAsync(string title, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var url = "https://es.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&format=json&exchars=1200&titles=" + Uri.EscapeDataString(title);
+            var json = await WebClient.GetStringAsync(url, cancellationToken);
+            using var document = JsonDocument.Parse(json);
+            var pages = document.RootElement.GetProperty("query").GetProperty("pages");
+            foreach (var page in pages.EnumerateObject())
+            {
+                if (page.Value.TryGetProperty("extract", out var extract))
+                {
+                    var text = extract.GetString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        return text.Trim();
+                    }
+                }
+            }
+
+            return null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException or NotSupportedException or JsonException or KeyNotFoundException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<string?> TryNominatimAsync(string query, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var place = CleanPlaceQuery(query);
+            var url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=3&accept-language=es&addressdetails=1&q=" + Uri.EscapeDataString(place);
+            var json = await WebClient.GetStringAsync(url, cancellationToken);
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            var builder = new StringBuilder();
+            builder.AppendLine($"Datos de ubicación reales (OpenStreetMap/Nominatim) para \"{place}\":");
+            var count = 0;
+            foreach (var item in document.RootElement.EnumerateArray())
+            {
+                count++;
+                var name = item.GetProperty("display_name").GetString() ?? string.Empty;
+                var lat = item.GetProperty("lat").GetString() ?? string.Empty;
+                var lon = item.GetProperty("lon").GetString() ?? string.Empty;
+                builder.AppendLine($"{count}. {name}");
+                builder.AppendLine($"   Coordenadas: {lat}, {lon}");
+                if (item.TryGetProperty("category", out var cat) && item.TryGetProperty("type", out var typ))
+                {
+                    builder.AppendLine($"   Tipo de lugar: {cat.GetString()}/{typ.GetString()}");
+                }
+            }
+
+            return builder.ToString().TrimEnd();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException or NotSupportedException or JsonException or KeyNotFoundException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<string?> TryOpenMeteoAsync(string query, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var place = Regex.Replace(query, @"\b(climas?|temperaturas?|pron[óo]sticos?|lluvias?|llover[aá]?|va\s+a\s+llover|el\s+tiempo|c[óo]mo\s+est[áa]|consulta\b|actual)\b", " ", RegexOptions.IgnoreCase);
+            place = Regex.Replace(place, @"^\s*(?:el\s+|la\s+|de\s+|del\s+|en\s+|por\s+)+", string.Empty, RegexOptions.IgnoreCase);
+            place = Regex.Replace(place, @"[?\s]+$", string.Empty).Trim();
+            if (place.Length < 3)
+            {
+                return null;
+            }
+
+            // countrycodes=ar: sin país explícito en la consulta, el agente opera
+            // desde Salta, Argentina; sin el sesgo, "salta" matchea Salta Carnero (España).
+            var geoUrl = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=es&countrycodes=ar&q=" + Uri.EscapeDataString(place);
+            var geoJson = await WebClient.GetStringAsync(geoUrl, cancellationToken);
+            using var geoDoc = JsonDocument.Parse(geoJson);
+            if (geoDoc.RootElement.ValueKind != JsonValueKind.Array || geoDoc.RootElement.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            var geoFirst = geoDoc.RootElement[0];
+            var lat = geoFirst.GetProperty("lat").GetString() ?? string.Empty;
+            var lon = geoFirst.GetProperty("lon").GetString() ?? string.Empty;
+            var placeName = geoFirst.GetProperty("display_name").GetString() ?? place;
+
+            var wxUrl = "https://api.open-meteo.com/v1/forecast?latitude=" + lat
+                      + "&longitude=" + lon
+                      + "&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m"
+                      + "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=3";
+            var wxJson = await WebClient.GetStringAsync(wxUrl, cancellationToken);
+            using var wxDoc = JsonDocument.Parse(wxJson);
+            var current = wxDoc.RootElement.GetProperty("current");
+            var builder = new StringBuilder();
+            builder.AppendLine($"Clima REAL medido ahora en {placeName} (fuente: Open-Meteo):");
+            builder.AppendLine($"Ahora: {current.GetProperty("temperature_2m").GetDouble()} °C, sensación térmica {current.GetProperty("apparent_temperature").GetDouble()} °C, humedad {current.GetProperty("relative_humidity_2m").GetInt32()} %, viento {current.GetProperty("wind_speed_10m").GetDouble()} km/h.");
+
+            if (wxDoc.RootElement.TryGetProperty("daily", out var daily))
+            {
+                var dates = daily.GetProperty("time");
+                var maxs = daily.GetProperty("temperature_2m_max");
+                var mins = daily.GetProperty("temperature_2m_min");
+                var rains = daily.GetProperty("precipitation_probability_max");
+                for (var dayIndex = 0; dayIndex < dates.GetArrayLength(); dayIndex++)
+                {
+                    var label = dayIndex == 0 ? "Hoy" : dayIndex == 1 ? "Mañana" : "Pasado mañana";
+                    var rain = rains.GetArrayLength() > dayIndex && rains[dayIndex].ValueKind == JsonValueKind.Number
+                        ? $", prob. de lluvia {rains[dayIndex].GetInt32()} %"
+                        : string.Empty;
+                    builder.AppendLine($"{label}: máxima {maxs[dayIndex].GetDouble()} °C, mínima {mins[dayIndex].GetDouble()} °C{rain}.");
+                }
+            }
+
+            return builder.ToString().TrimEnd();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException or NotSupportedException or JsonException or KeyNotFoundException or ArgumentException or IndexOutOfRangeException)
         {
             return null;
         }

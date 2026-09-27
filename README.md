@@ -11,7 +11,7 @@ Terminal de inteligencia artificial que corre **modelos GGUF de forma local** co
 - **100 % local** — el modelo se ejecuta en tu equipo con `llama.cpp`. Nada sale de tu máquina salvo que tú lo autorices.
 - **Sin Python** — C# / .NET 8 + binarios de `llama.cpp`. Ejecutable portable de un solo archivo.
 - **Streaming real** — los tokens se imprimen mientras se generan. `Ctrl+C` detiene la respuesta en curso.
-- **Búsqueda en internet con permiso** — el agente emite el marcador `[[NET]]`, el sistema te pregunta una sola vez por sesión y, si autorizas, busca en DuckDuckGo / Wikipedia e inyecta los resultados reales en el contexto.
+- **Búsqueda en internet con permiso** — el agente emite el marcador `[[NET]]`, el sistema te pregunta una sola vez por sesión y, si autorizas, busca por intención (lugares: Nominatim/OpenStreetMap; clima: Open-Meteo; resto: Wikipedia/DuckDuckGo con el texto de la página resultante) e inyecta los datos reales en el contexto.
 - **Anti-alucinación** — si el modelo no está seguro de un dato (empresas, personas, eventos, precios, noticias), **busca en lugar de inventar**. Si la búsqueda no arroja nada, lo dice claramente.
 - **Búsqueda explícita del usuario** — si escribes `busca en internet <tema>`, `investiga <tema>` o `<tema> en la web`, la terminal busca directamente sin depender del modelo.
 - **Herramientas de agente (READ / CMD / WRITE)** — el agente puede leer archivos y carpetas, ejecutar comandos de PowerShell y crear o reescribir archivos mediante los marcadores `[[READ]]`, `[[CMD]]` y `[[WRITE]]`. Ejecución y escritura **siempre piden tu confirmación (s/n)**. Máximo 5 herramientas encadenadas por turno.
@@ -46,6 +46,51 @@ portable.exe doctor             # diagnóstico del sistema
 portable.exe descargar          # descarga modelos agente
 portable.exe config show        # configuración actual
 portable.exe help               # ayuda completa
+```
+
+### Mockup de la interfaz
+
+```
+//============================== IR3C5.CORE ==============================//
+                 ####
+        ##       ####       ##
+         ####    #####    ####
+           #### ##### ####
+             ##########
+    ##        ##########        ##
+      ####   ###########   ####
+        ###################
+   ################################
+        ###################
+      ####   ###########   ####
+    ##        ##########        ##
+             ##########
+           #### ##### ####
+         ####    #####    ####
+        ##       ####       ##
+                 ####
+//============================== ESTALINGRADO CORP ======================//
+  INTRA-NET :: IA27 TERMINAL :: sistema local // canal seguro
+  ------------------------------------------------------------------------
+  modelo  : Atenea-Omega-IB2.gguf
+  origen  : C:\Users\nicot\OneDrive\Desktop\Estalingrado corp\proyectos\IA 27 T\modelos
+  motor   : llama.cpp local // net: on // internet bajo autorización
+  ------------------------------------------------------------------------
+  /help ayuda · /clear limpiar · /use <modelo> cambiar · /exit salir
+
+
+Cargando el modelo; la primera carga puede tardar...
+Listo. Escribe /help para ver los comandos del agente. Ctrl+C detiene la respuesta en curso.
+
+
+[INTRANET] ¿Permitir que el agente busque en internet automáticamente en esta sesión? (s/n): s
+  Internet autorizado para esta sesión. El agente buscará automáticamente cuando necesite datos actuales.
+
+
+tú> hola atenea
+IA27>
+[aún generando; Ctrl+C para detener. Para respuestas más cortas usa /tokens 512]
+IA27> ¡Hola! ¿Cómo estás? Estoy aquí para ayudarte en lo que necesites. ¿En qué puedo asistirte hoy?
 ```
 
 ### Comandos del agente
