@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Fury³ - Busca y encuentra</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            background-color: #3498db;
+            color: white;
+            text-align: center;
+            padding-top: 30px;
+            min-height: 100px;
+        }
+        .container {
+            width: 50%;
+            margin: auto;
+            overflow: hidden;
+        }
+        input[type="text"] {
+            width: 70%;
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid #3498db;
+            outline: none;
+        }
+        button {
+            float: right;
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <input type="text" placeholder="¿Qué estás buscando?" id="searchBox">
+            <button onclick="doSearch()">Buscar</button>
+        </div>
+    </header>
+    <script>
+        function doSearch() {
+            var query = document.getElementById("searchBox").value;
+            // Aquí puedes agregar la lógica para buscar en la web o tu propio contenido.
+            alert("Buscando: " + query);
+        }
+    </script>
+</body>
+</html>
