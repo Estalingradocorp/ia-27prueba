@@ -421,7 +421,7 @@ public sealed class TerminalApplication
 
             if (input.StartsWith('/'))
             {
-                var action = await HandleAgentCommandAsync(session, input);
+                var action = await HandleAgentCommandAsync(session, input, cancellationToken);
                 if (action is not null)
                 {
                     return action;
@@ -466,7 +466,7 @@ public sealed class TerminalApplication
         }
     }
 
-    private async Task<SessionAction?> HandleAgentCommandAsync(LlamaServerSession session, string input)
+    private async Task<SessionAction?> HandleAgentCommandAsync(LlamaServerSession session, string input, CancellationToken cancellationToken = default)
     {
         var separator = input.IndexOf(' ');
         var command = (separator < 0 ? input : input[..separator]).ToLowerInvariant();
@@ -479,9 +479,10 @@ public sealed class TerminalApplication
                 return new SessionAction(true, null);
             case "/help":
             case "/ayuda":
-                Console.WriteLine("/help  /clear  /history  /system [texto]  /modelos  /cambiar  /use <selector>  /descargar  /temp [valor]  /rp [valor]  /topp [valor]  /tokens [valor]  /net [on|off]  /exit");
+                Console.WriteLine("/help  /clear  /history  /system [texto]  /modelos  /cambiar  /use <selector>  /descargar  /temp [valor]  /rp [valor]  /topp [valor]  /tokens [valor]  /net [on|off]  /harness <objetivo>  /exit");
                 Console.WriteLine("Ctrl+C detiene la respuesta en curso; /tokens 512 produce respuestas más cortas.");
                 Console.WriteLine("Herramientas del agente: puede leer archivos/carpetas ([[READ]]), ejecutar comandos PowerShell ([[CMD]]) y crear archivos ([[WRITE]]); ejecución y escritura siempre piden tu permiso (s/n).");
+                Console.WriteLine("/harness <objetivo>: modo agéntico por pasos — el agente planifica, usa herramientas, verifica resultados y termina solo con [[DONE]] (máx. 15 pasos).");
                 break;
             case "/clear":
             case "/limpiar":
@@ -640,6 +641,10 @@ public sealed class TerminalApplication
                 Console.WriteLine(config.NetEnabled
                     ? "Internet: on — el modelo pedirá tu permiso antes de cada búsqueda."
                     : "Internet: off — el modelo responderá solo con su conocimiento local.");
+                break;
+            case "/harness":
+            case "/agente":
+                await RunHarnessAsync(session, argument, cancellationToken);
                 break;
             case "/tokens":
             case "/max-tokens":
@@ -841,6 +846,189 @@ public sealed class TerminalApplication
         }
     }
 
+    private static readonly Regex HarnessDonePattern = new(@"\[\[DONE\]\]", RegexOptions.Compiled);
+    private const int HarnessMaxSteps = 15;
+
+    private async Task RunHarnessAsync(LlamaServerSession session, string objective, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(objective))
+        {
+            Console.WriteLine("Uso: /harness <objetivo> — el agente trabaja por pasos (plan → herramienta → verificar) hasta dar por cumplido el objetivo.");
+            return;
+        }
+
+        Console.ForegroundColor = ConsoleColor.DarkBlue;
+        Console.WriteLine("//== MODO HARNESS =======================================================//");
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"  Objetivo: {objective}");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine($"  Límite: {HarnessMaxSteps} pasos · Ctrl+C para abortar · escribir y crear archivos siempre piden permiso");
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine();
+
+        session.AddContextMessage($"[SISTEMA · MODO HARNESS ACTIVADO]\nObjetivo del usuario: \"{objective}\".\nActuás como agente autónomo por pasos. En cada mensaje hacé UNA de estas tres cosas, y nada más:\n(a) un plan breve en pasos numerados (solo al inicio o si el plan cambia);\n(b) UNA herramienta, con tu mensaje empezando directamente por su marcador ([[READ]] ruta / [[CMD]] comando / [[WRITE]] ruta :: contenido [[END]]);\n(c) [[DONE]] seguido del resumen final, solo cuando el objetivo esté verificado como cumplido.\nTras cada herramienta recibirás el resultado real del sistema: verificalo antes del siguiente paso. Jamás afirmes que creaste un archivo o ejecutaste un comando sin la confirmación del sistema. Límite: {HarnessMaxSteps} pasos; si el objetivo no cabe, proponé lo antes posible un plan parcial alcanzable.");
+
+        // Buffer anti-fugas (mismo criterio que AskWithNetPermissionAsync):
+        // retiene la cola desde el último '[' para que los marcadores no se impriman.
+        var streamBuffer = new StringBuilder();
+        Func<string, Task> bufferedToken = piece =>
+        {
+            streamBuffer.Append(piece);
+            var cut = streamBuffer.ToString().LastIndexOf('[');
+            if (cut < 0)
+            {
+                cut = Math.Max(0, streamBuffer.Length - 14);
+            }
+            else if (cut == 0 && streamBuffer.Length > 200 && (streamBuffer.Length < 2 || streamBuffer[1] != '['))
+            {
+                cut = 1;
+            }
+
+            if (cut <= 0)
+            {
+                return Task.CompletedTask;
+            }
+
+            var chunk = streamBuffer.ToString(0, cut);
+            streamBuffer.Remove(0, cut);
+            lock (GenerationNotice.Sync)
+            {
+                Console.Write(chunk);
+            }
+            return Task.CompletedTask;
+        };
+
+        Task FlushStepAsync()
+        {
+            if (streamBuffer.Length == 0)
+            {
+                return Task.CompletedTask;
+            }
+
+            var chunk = StripToolMarkers(streamBuffer.ToString());
+            streamBuffer.Clear();
+            if (chunk.Length == 0 || chunk.Length < 20 && chunk.Trim().StartsWith('['))
+            {
+                return Task.CompletedTask;
+            }
+
+            lock (GenerationNotice.Sync)
+            {
+                Console.Write(chunk);
+            }
+            return Task.CompletedTask;
+        }
+
+        Console.ForegroundColor = ConsoleColor.DarkBlue;
+        Console.Write("IA27> ");
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        var content = await session.AskContinueAsync(bufferedToken, cancellationToken);
+        for (var step = 1; step <= HarnessMaxSteps; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (HarnessDonePattern.IsMatch(content))
+            {
+                streamBuffer.Clear();
+                var summary = HarnessDonePattern.Replace(StripToolMarkers(content), string.Empty).Trim();
+                session.ReplaceLastAssistant(summary);
+                Console.WriteLine();
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[HARNESS · OBJETIVO CUMPLIDO en {step - 1} paso(s)]");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                if (summary.Length > 0)
+                {
+                    Console.WriteLine(summary);
+                }
+                return;
+            }
+
+            var toolRequest = MatchToolRequest(content);
+            if (toolRequest is null)
+            {
+                // Sin marcador y sin [[DONE]]: plan/razonamiento. Se muestra y se pide la próxima acción.
+                await FlushStepAsync();
+                if (content.Contains("[[WRITE]]", StringComparison.Ordinal) || content.Contains("[[CMD]]", StringComparison.Ordinal) || content.Contains("[[READ]]", StringComparison.Ordinal))
+                {
+                    streamBuffer.Clear();
+                    session.ReplaceLastAssistant(StripToolMarkers(content));
+                    session.AddContextMessage("[SISTEMA · harness]\nTu mensaje contenía un marcador incompleto o mal formado (en [[WRITE]] el cierre [[END]] es obligatorio). Esa acción NO se ejecutó. Reemití UNA sola acción con el formato exacto.");
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("[HARNESS] Marcador malformado; reintentando el paso...");
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                }
+                else if (step > 2)
+                {
+                    session.AddContextMessage("[SISTEMA · harness]\nPlan recibido. Ahora ejecutá: emití la próxima acción con UNA herramienta (empezando el mensaje por el marcador) o [[DONE]] si el objetivo ya está cumplido.");
+                }
+            }
+            else
+            {
+                streamBuffer.Clear();
+                session.ReplaceLastAssistant(StripToolMarkers(content));
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkMagenta;
+                Console.WriteLine($"[HARNESS · paso {step}/{HarnessMaxSteps}] {toolRequest.Kind}: {Truncate(toolRequest.Argument, 80)}");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                string toolContext;
+                try
+                {
+                    toolContext = await ExecuteToolWithPermissionAsync(toolRequest, explicitByUser: false, cancellationToken);
+                }
+                catch (TerminalException toolError)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[HARNESS] error en {toolRequest.Kind}: {toolError.Message}");
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    toolContext = $"[SISTEMA · herramienta {toolRequest.Kind} fallida]\n{toolError.Message}\nDecidí si reintentar de otra forma o dar el objetivo por bloqueado; no inventes el resultado.";
+                }
+
+                session.AddContextMessage(toolContext);
+            }
+
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkBlue;
+            Console.Write("IA27> ");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            content = await session.AskContinueAsync(bufferedToken, cancellationToken);
+        }
+
+        streamBuffer.Clear();
+        await FlushStepAsync();
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"[HARNESS · LÍMITE ALCANZADO] Se llegó a {HarnessMaxSteps} pasos sin [[DONE]]. El modo harness se cerró; podés continuar a mano o relanzar con un objetivo más chico.");
+        Console.ForegroundColor = ConsoleColor.Cyan;
+    }
+
+    private static readonly Regex PlaceholderPathPattern = new(@"TuNombreDeUsuario|NombreDeUsuario|TuUsuario|YourName|YourUser(Name)?|<\s*usuario\s*>|%USERNAME%|\bUsuario\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex FolderAliasPattern = new(@"\b(?<doc>documentos?|mis\s+documentos?)\b|\b(?<desk>escritorio|desktop)\b|\b(?<down>descargas?|downloads?)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static string ResolveFolderAlias(string alias)
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (Regex.IsMatch(alias, "escritorio|desktop", RegexOptions.IgnoreCase))
+        {
+            return Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        }
+
+        if (Regex.IsMatch(alias, "descargas?|downloads?", RegexOptions.IgnoreCase))
+        {
+            return Path.Combine(userProfile, "Downloads");
+        }
+
+        return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+    }
+
+    private static string PlaceholderInterceptionMessage(string badPath)
+    {
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        return $"[SISTEMA · ruta placeholder interceptada]\nLa ruta que emitiste (\"{badPath}\") contiene un placeholder inventado y NO se ejecutó nada. Rutas reales de este equipo: Documentos = \"{documents}\"; Escritorio = \"{desktop}\"; usuario = \"{Environment.UserName}\". Reemití la herramienta con la ruta REAL y completa (ej.: [[WRITE]] {documents}\\archivo.txt :: contenido [[END]]).";
+    }
+
     private static readonly Regex NetRequestPattern = new(@"\[\[NET\]\]\s*(?<query>[^\r\n]*)", RegexOptions.Compiled);
     private static readonly Regex NetRefusalPattern = new(@"(no\s+tengo?\s+(?:la\s+)?capacidad\s+de\s+navegar|no\s+puedo\s+navegar|no\s+puedo\s+acceder\s+(?:a\s+)?(?:internet|la\s+web|wikipedia)|no\s+tengo?\s+(?:acceso|conexión)\s+(?:a\s+)?(?:internet|la\s+web)|sin\s+(?:acceso|conexión)\s+a\s+internet|no\s+puedo\s+buscar\s+en\s+(?:internet|la\s+web|la\s+red)|no\s+puedo\s+(?:realizar|hacer)\s+b[úu]squedas|no\s+tengo?\s+(?:la\s+)?capacidad\s+de\s+(?:buscar|realizar\s+b[úu]squedas|navegar|acceder)|no\s+tengo?\s+internet|no\s+puedo\s+proporcionar\s+informaci[oó]n\s+(?:en\s+tiempo\s+real|actual)|no\s+puedo\s+consultar\s+(?:fuentes|internet|la\s+web)|no\s+puedo\s+verificar\s+informaci[oó]n\s+actual|como\s+(?:modelo|asistente)\s+(?:de\s+)?(?:ia|inteligencia\s+artificial|lenguaje)[^.]{0,80}internet)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex ExplicitSearchIntent = new(@"^\s*(?:busca|b[úu]scame|buscar|investiga|investigar|googlea|consulta(?:r)?|averigua|averiguar|mira|mirar)\b[\s,:\-]*(?<query>.+?)\s*(?:en\s+(?:internet|la\s+web|la\s+red|google|wikipedia|la\s+wiki))?[.\s]*$|^\s*(?<query>.+?)\s+en\s+(?:internet|la\s+web|la\s+red|google|wikipedia)\s*[.\s]*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -870,8 +1058,12 @@ public sealed class TerminalApplication
 
     private static readonly Regex ReadRequestPattern = new(@"\[\[READ\]\]\s*(?<path>[^\r\n]+)", RegexOptions.Compiled);
     private static readonly Regex CmdRequestPattern = new(@"\[\[CMD\]\]\s*(?<cmd>[^\r\n]+)", RegexOptions.Compiled);
-    private static readonly Regex WriteRequestPattern = new(@"\[\[WRITE\]\]\s*(?<path>[^\r\n]+?)\s*::\s*(?<body>[\s\S]*)$", RegexOptions.Compiled);
+    private static readonly Regex WriteRequestPattern = new(@"\[\[WRITE\]\]\s*(?<path>[^\r\n]+?)\s*::\s*(?<body>[\s\S]*?)\s*\[\[END\]\]", RegexOptions.Compiled);
+    private static readonly Regex WriteMarkerPresent = new(@"\[\[WRITE\]\]", RegexOptions.Compiled);
+    private static readonly Regex EndMarkerPattern = new(@"\[\[END\]\]", RegexOptions.Compiled);
     private static readonly Regex DangerousCommandPattern = new(@"\b(?:format|diskpart|bcdedit|vssadmin)\b|remove-item[^\r\n]*-recurse[^\r\n]*-force|rm\s+-rf|del\s+/[sq]|rd\s+/s|shutdown|restart-computer|stop-computer|reg\s+delete|takeown|icacls[^\r\n]*/reset|clear-disk|initialize-disk|set-executionpolicy\s+unrestricted", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex WriteClaimPattern = new(@"(?:he\s+creado|cre[ée]|ya\s+(?:cre[ée]|guard[ée])|acabo\s+de\s+crear)\s+(?:(?:un|una|el|la|este|esta)\s+)?(?:archivo|fichero|documento|txt|texto)|archivo\s+creado\s+en|qued[óo]\s+(?:guardado|creado)\s+en", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex CmdClaimPattern = new(@"(?:ejecut[ée]|corri[ée]|lanc[ée])\s+el\s+comando|el\s+comando\s+(?:se\s+ejecut[óo]|devolvi[óo]|mostr[óo])|resultado\s+del\s+comando", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private sealed record ToolRequest(string Kind, string Argument, string? Body);
 
@@ -903,6 +1095,8 @@ public sealed class TerminalApplication
         var cleaned = WriteRequestPattern.Replace(content, string.Empty);
         cleaned = CmdRequestPattern.Replace(cleaned, string.Empty);
         cleaned = ReadRequestPattern.Replace(cleaned, string.Empty);
+        cleaned = WriteMarkerPresent.Replace(cleaned, string.Empty);
+        cleaned = EndMarkerPattern.Replace(cleaned, string.Empty);
         return cleaned.TrimEnd();
     }
 
@@ -1074,6 +1268,17 @@ public sealed class TerminalApplication
 
     private async Task<string> ExecuteToolWithPermissionAsync(ToolRequest tool, bool explicitByUser, CancellationToken cancellationToken)
     {
+        // Filtro anti-placeholder: el modelo no conoce rutas reales salvo que el
+        // system prompt se las dé; bloquear placeholders en vez de crear carpetas falsas.
+        if (tool.Kind is "READ" or "WRITE" && PlaceholderPathPattern.IsMatch(tool.Argument))
+        {
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"[INTERCEPCIÓN] Ruta placeholder detectada ({Truncate(tool.Argument, 60)}); no se ejecutó nada. Forzando ruta real...");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            return PlaceholderInterceptionMessage(tool.Argument);
+        }
+
         string result;
         switch (tool.Kind)
         {
@@ -1094,6 +1299,7 @@ public sealed class TerminalApplication
                 Console.Write("[herramienta: READ] ");
                 Console.ForegroundColor = ConsoleColor.Cyan;
                 result = ExecuteReadTool(tool.Argument);
+                lastToolPath = readPath;
                 Console.WriteLine($"leyendo {Truncate(readPath, 60)}... listo.");
                 break;
             case "CMD":
@@ -1124,6 +1330,7 @@ public sealed class TerminalApplication
                 Console.Write("[herramienta: WRITE] ");
                 Console.ForegroundColor = ConsoleColor.Cyan;
                 result = ExecuteWriteTool(tool.Argument, tool.Body ?? string.Empty);
+                lastToolPath = writePath;
                 Console.WriteLine("escribiendo... listo.");
                 break;
             default:
@@ -1134,9 +1341,14 @@ public sealed class TerminalApplication
     }
 
     // Intención explícita del usuario: "lee X", "ejecuta Y", "crea el archivo Z con..."
-    private static readonly Regex ExplicitReadIntent = new(@"^\s*(?:lee|l[ée]eme|leer|abr[íi]|mostr[áa](?:me)?|muestra|revisa|analiza|resum[íi])\s+(?:(?:el|la|los|las|este|esta|un|una)\s+)?(?:archivo|fichero|carpeta|directorio|contenido\s+de)\s*:?\s*(?<path>.+?)\s*[.!?]*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private string? lastToolPath;
+    private static readonly Regex ExplicitReadIntent = new(@"^\s*(?:lee|l[ée]eme|leer|abr[íi]|mostr[áa](?:me)?|muestra|revisa|analiza|resum[íi])\s+(?:(?:el|la|los|las|este|esta|un|una)\s+)?(?:archivo|fichero|carpeta|carpepeta|directorio|contenido\s+de)\s*:?\s*(?<path>.+?)\s*[.!?]*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex ExplicitCmdIntent = new(@"^\s*(?:ejecuta(?:me)?|ejecutar|corre(?:me)?|correr|lanza(?:r)?)\s+(?:el\s+comando\s+)?(?<cmd>.+?)\s*[.!?]*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    private static readonly Regex ExplicitWriteIntent = new(@"^\s*(?:crea(?:me)?|crear|escribe(?:me)?|escribir|genera(?:me)?)\s+(?:un\s+)?(?:el\s+)?archivo\s+(?<path>[^\s:]+(?::[^\s]*)?)(?:\s+(?:con|que\s+(?:diga|contenga|tenga)|con\s+el\s+contenido))\s*:?\s*(?<body>.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ExplicitWriteIntent = new(@"^\s*(?:(?:si|dale|ahora|bueno|ok|y)\s+)?(?:crea(?:me|nos)?|crear|escribe(?:me|nos)?|escribir|genera(?:me|nos)?|guarda(?:me|nos)?)\s+(?:(?:un|una|el|la|este|esta)\s+)?(?:archivo|fichero|txt|texto|tecto|nota|documento)\b(?<rest>[\s\S]*)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ExplicitPathPattern = new(@"(?:[A-Za-z]:[\\/][^\s""']+|[^\s""'/\\]+\.\w{1,8})", RegexOptions.Compiled);
+    private static readonly Regex ExplicitBodyPattern = new(@"(?:con\s+(?:el\s+)?(?:contenido|texto|t[íi]tulo)|que\s+(?:diga|contenga|tenga|sea))\s*:?\s*(?<body>[\s\S]+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ExplicitNamePattern = new(@"t[íi]tulo\s+(?<name>[\w.\-]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ContextReferenceBody = new(@"^\s*(?:(?:con\s+)?(?:to[dw]a\s+)?(?:esta|la)\s+(?:data|info(?:rmaci[oó]n)?)|esto|eso|este\s+texto|ese\s+texto|este\s+contenido|lo\s+(?:anterior|de\s+antes|mencionado|que\s+(?:hablamos|vimos|escribiste)))\s*[.!]*\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static bool LooksLikePath(string value)
     {
@@ -1154,14 +1366,73 @@ public sealed class TerminalApplication
         return Regex.IsMatch(value, @"^[\w .\-()áéíóúñÁÉÍÓÚÑ]+\.\w{1,8}$");
     }
 
-    private static bool TryExtractExplicitTool(string prompt, out ToolRequest tool)
+    private bool TryExtractExplicitTool(string prompt, out ToolRequest tool)
     {
         tool = null!;
         var writeMatch = ExplicitWriteIntent.Match(prompt);
-        if (writeMatch.Success && LooksLikePath(writeMatch.Groups["path"].Value))
+        if (writeMatch.Success)
         {
-            tool = new ToolRequest("WRITE", writeMatch.Groups["path"].Value.Trim().Trim('"'), writeMatch.Groups["body"].Value);
-            return true;
+            var rest = writeMatch.Groups["rest"].Value;
+            var pathMatch = ExplicitPathPattern.Match(rest);
+            string? path = pathMatch.Success ? pathMatch.Value.Trim('"') : null;
+            if (path is null)
+            {
+                string? baseDirectory = null;
+                var aliasMatch = FolderAliasPattern.Match(rest);
+                if (aliasMatch.Success)
+                {
+                    // Alias de carpeta real: "Documentos", "Escritorio", "Descargas"
+                    baseDirectory = ResolveFolderAlias(aliasMatch.Value);
+                }
+                else if (lastToolPath is not null)
+                {
+                    // Sin ruta explícita: usar la carpeta de la última herramienta usada (ej. "en esa carpeta")
+                    baseDirectory = Directory.Exists(lastToolPath) ? lastToolPath : Path.GetDirectoryName(lastToolPath);
+                }
+
+                if (!string.IsNullOrWhiteSpace(baseDirectory))
+                {
+                    var nameMatch = ExplicitNamePattern.Match(rest);
+                    var fileName = nameMatch.Success ? nameMatch.Groups["name"].Value : null;
+                    if (!string.IsNullOrWhiteSpace(fileName))
+                    {
+                        if (!Path.HasExtension(fileName))
+                        {
+                            fileName += ".txt";
+                        }
+
+                        path = Path.Combine(baseDirectory, fileName);
+                    }
+                    else if (aliasMatch.Success)
+                    {
+                        // Alias sin nombre de archivo: ordenar al modelo elegir nombre dentro de la carpeta real
+                        path = baseDirectory;
+                    }
+                }
+            }
+
+            if (path is not null)
+            {
+                var bodyMatch = ExplicitBodyPattern.Match(rest);
+                string? body = null;
+                if (bodyMatch.Success)
+                {
+                    var candidate = bodyMatch.Groups["body"].Value.Trim().Trim('"');
+                    if (pathMatch.Success)
+                    {
+                        candidate = Regex.Replace(candidate, Regex.Escape(pathMatch.Value), string.Empty).Trim();
+                    }
+
+                    candidate = ExplicitNamePattern.Replace(candidate, string.Empty).Trim(' ', '.', ',', ':', '-');
+                    if (candidate.Length >= 5 && !ContextReferenceBody.IsMatch(candidate))
+                    {
+                        body = candidate;
+                    }
+                }
+
+                tool = new ToolRequest("WRITE", path, body);
+                return true;
+            }
         }
 
         var readMatch = ExplicitReadIntent.Match(prompt);
@@ -1229,27 +1500,51 @@ public sealed class TerminalApplication
                 return Task.CompletedTask;
             }
 
-            var chunk = streamBuffer.ToString();
+            var chunk = StripToolMarkers(streamBuffer.ToString());
             streamBuffer.Clear();
+            // Colas que solo son fragmentos de marcador (p. ej. "[" o "[[WRI") no se imprimen
+            if (chunk.Length == 0 || chunk.Length < 20 && chunk.Trim().StartsWith('['))
+            {
+                return Task.CompletedTask;
+            }
+
             return onToken(chunk);
         }
 
         void DiscardBuffer() => streamBuffer.Clear();
 
+        var pendingWriteExecuted = false;
+        var pendingCmdExecuted = false;
+        var writtenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (TryExtractExplicitTool(prompt, out var explicitTool))
         {
-            try
+            if (explicitTool is { Kind: "WRITE", Body: null })
             {
-                var explicitResult = await ExecuteToolWithPermissionAsync(explicitTool, explicitByUser: true, cancellationToken);
-                session.AddContextMessage(explicitResult + $"\nPedido original del usuario: \"{prompt}\"");
-                Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.DarkBlue;
-                Console.Write("IA27> ");
-                Console.ForegroundColor = ConsoleColor.Cyan;
+                // El usuario pidió crear el archivo pero no dio el contenido literal
+                // (ej. "con toda esta data"): ordenar al modelo emitir [[WRITE]] usando el contexto.
+                session.AddContextMessage($"[SISTEMA · el usuario pidió explícitamente crear un archivo]\nRuta indicada: \"{explicitTool.Argument}\". El contenido debe basarse en la conversación anterior. Tu respuesta debe EMPEZAR EXACTAMENTE por [[WRITE]] {explicitTool.Argument} :: <contenido completo> y TERMINAR con [[END]]. No afirmes que lo creaste: el sistema lo hará tras el permiso del usuario y te confirmará.");
             }
-            catch (TerminalException toolError)
+            else
             {
-                session.AddContextMessage($"[SISTEMA · herramienta fallida]\n{toolError.Message}\nInforma al usuario del error sin inventar resultados. Pedido original: \"{prompt}\"");
+                try
+                {
+                    var explicitResult = await ExecuteToolWithPermissionAsync(explicitTool, explicitByUser: true, cancellationToken);
+                    if (explicitTool.Kind == "WRITE")
+                    {
+                        pendingWriteExecuted = true;
+                        writtenPaths.Add(ResolveToolPath(explicitTool.Argument));
+                    }
+                    if (explicitTool.Kind == "CMD") { pendingCmdExecuted = true; }
+                    session.AddContextMessage(explicitResult + $"\nPedido original del usuario: \"{prompt}\"");
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.DarkBlue;
+                    Console.Write("IA27> ");
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                }
+                catch (TerminalException toolError)
+                {
+                    session.AddContextMessage($"[SISTEMA · herramienta fallida]\n{toolError.Message}\nInforma al usuario del error sin inventar resultados. Pedido original: \"{prompt}\"");
+                }
             }
         }
         else if (config.NetEnabled && TryExtractExplicitSearchQuery(prompt, out var explicitQuery))
@@ -1277,6 +1572,9 @@ public sealed class TerminalApplication
         var content = await session.AskAsync(prompt, bufferedToken, cancellationToken);
         var netRounds = 0;
         var toolRounds = 0;
+        var claimRetries = 0;
+        var writeExecuted = pendingWriteExecuted;
+        var cmdExecuted = pendingCmdExecuted;
         var originalPrompt = prompt;
         var searchContext = (string?)null;
         while (true)
@@ -1296,21 +1594,96 @@ public sealed class TerminalApplication
                 var cleanedTool = StripToolMarkers(content);
                 session.ReplaceLastAssistant(cleanedTool);
                 string toolContext;
-                try
-                {
-                    toolContext = await ExecuteToolWithPermissionAsync(toolRequest, explicitByUser: false, cancellationToken);
-                }
-                catch (TerminalException toolError)
+                var resolvedWritePath = toolRequest.Kind == "WRITE" ? ResolveToolPath(toolRequest.Argument) : null;
+                if (resolvedWritePath is not null && writtenPaths.Contains(resolvedWritePath))
                 {
                     Console.WriteLine();
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"[herramienta: {toolRequest.Kind}] error: {toolError.Message}");
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"[INTERCEPCIÓN] Escritura duplicada bloqueada: {Truncate(resolvedWritePath, 60)} ya fue creado en este turno.");
                     Console.ForegroundColor = ConsoleColor.Cyan;
-                    toolContext = $"[SISTEMA · herramienta {toolRequest.Kind} fallida]\n{toolError.Message}\nInforma al usuario del error; no inventes el resultado.";
+                    toolContext = $"[SISTEMA · escritura duplicada bloqueada]\nEl archivo \"{resolvedWritePath}\" YA fue creado en este turno; no se volvió a escribir. NO reemitas [[WRITE]]: confirmá al usuario citando la confirmación de creación que ya recibiste del sistema.";
+                }
+                else
+                {
+                    try
+                    {
+                        toolContext = await ExecuteToolWithPermissionAsync(toolRequest, explicitByUser: false, cancellationToken);
+                        if (toolRequest.Kind == "WRITE" && resolvedWritePath is not null)
+                        {
+                            writeExecuted = true;
+                            writtenPaths.Add(resolvedWritePath);
+                        }
+                        if (toolRequest.Kind == "CMD") { cmdExecuted = true; }
+                    }
+                    catch (TerminalException toolError)
+                    {
+                        Console.WriteLine();
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"[herramienta: {toolRequest.Kind}] error: {toolError.Message}");
+                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        toolContext = $"[SISTEMA · herramienta {toolRequest.Kind} fallida]\n{toolError.Message}\nInforma al usuario del error; no inventes el resultado.";
+                    }
                 }
 
                 session.AddContextMessage(toolContext);
                 Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkBlue;
+                Console.Write("IA27> ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                content = await session.AskContinueAsync(bufferedToken, cancellationToken);
+                continue;
+            }
+
+            // Marcador [[WRITE]] sin cierre [[END]]: el archivo NO se debe crear.
+            if (WriteMarkerPresent.IsMatch(content))
+            {
+                if (claimRetries >= 2)
+                {
+                    DiscardBuffer();
+                    session.ReplaceLastAssistant(StripToolMarkers(content));
+                    return "El modelo intentó escribir el archivo pero emitió un marcador incompleto (falta el cierre [[END]]); el archivo NO se creó. Reintentá el pedido.";
+                }
+
+                claimRetries++;
+                DiscardBuffer();
+                session.ReplaceLastAssistant(string.Empty);
+                session.AddContextMessage("[SISTEMA · marcador incompleto]\nEmitiste [[WRITE]] sin el cierre obligatorio [[END]]: el archivo NO se creó. Responde ahora con tu mensaje empezando EXACTAMENTE por [[WRITE]] <ruta> :: <contenido completo> y TERMINANDO con [[END]]. No afirmes nada: el sistema confirmará la creación.");
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("[INTERCEPCIÓN] Marcador [[WRITE]] incompleto (sin [[END]]). Reintentando con formato correcto...");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.ForegroundColor = ConsoleColor.DarkBlue;
+                Console.Write("IA27> ");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                content = await session.AskContinueAsync(bufferedToken, cancellationToken);
+                continue;
+            }
+
+            // Anti-alucinación: afirmó crear un archivo o ejecutar un comando sin usar herramientas.
+            var falseWriteClaim = !writeExecuted && WriteClaimPattern.IsMatch(content);
+            var falseCmdClaim = !cmdExecuted && CmdClaimPattern.IsMatch(content);
+            if (falseWriteClaim || falseCmdClaim)
+            {
+                if (claimRetries >= 2)
+                {
+                    await FlushBufferAsync();
+                    return content;
+                }
+
+                claimRetries++;
+                DiscardBuffer();
+                session.ReplaceLastAssistant(string.Empty);
+                var claimKind = falseWriteClaim
+                    ? "afirmaste haber creado/guardado un archivo, pero NO emitiste el marcador [[WRITE]]: el archivo NO existe"
+                    : "afirmaste haber ejecutado un comando, pero NO emitiste el marcador [[CMD]]: el comando NO se ejecutó";
+                var claimMarker = falseWriteClaim
+                    ? "Tu respuesta debe EMPEZAR EXACTAMENTE por [[WRITE]] <ruta> :: <contenido completo> y TERMINAR con [[END]]. Usa el contenido que ya redactaste en la conversación."
+                    : "Tu respuesta debe EMPEZAR EXACTAMENTE por [[CMD]] <comando>. El sistema pedirá permiso al usuario y luego lo ejecuta.";
+                session.AddContextMessage($"[SISTEMA · afirmación falsa interceptada]\nEn tu respuesta anterior {claimKind}. {claimMarker} No vuelvas a afirmar la acción: el sistema la ejecutará y te confirmará con un mensaje.");
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"[INTERCEPCIÓN] El modelo afirmó haber {(falseWriteClaim ? "creado un archivo" : "ejecutado un comando")} sin usar herramientas. Forzando reintento con marcador...");
+                Console.ForegroundColor = ConsoleColor.Cyan;
                 Console.ForegroundColor = ConsoleColor.DarkBlue;
                 Console.Write("IA27> ");
                 Console.ForegroundColor = ConsoleColor.Cyan;

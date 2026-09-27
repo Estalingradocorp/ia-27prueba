@@ -15,6 +15,7 @@ Terminal de inteligencia artificial que corre **modelos GGUF de forma local** co
 - **Anti-alucinación** — si el modelo no está seguro de un dato (empresas, personas, eventos, precios, noticias), **busca en lugar de inventar**. Si la búsqueda no arroja nada, lo dice claramente.
 - **Búsqueda explícita del usuario** — si escribes `busca en internet <tema>`, `investiga <tema>` o `<tema> en la web`, la terminal busca directamente sin depender del modelo.
 - **Herramientas de agente (READ / CMD / WRITE)** — el agente puede leer archivos y carpetas, ejecutar comandos de PowerShell y crear o reescribir archivos mediante los marcadores `[[READ]]`, `[[CMD]]` y `[[WRITE]]`. Ejecución y escritura **siempre piden tu confirmación (s/n)**. Máximo 5 herramientas encadenadas por turno.
+- **Modo harness (`/harness <objetivo>`)** — bucle agéntico autónomo: el agente planifica, usa herramientas paso a paso, verifica los resultados reales que le devuelve el sistema y termina por su cuenta emitiendo `[[DONE]]` con un resumen. Límite de 15 pasos y mismo régimen de permisos.
 - **Gestor de modelos integrado** — descarga, lista y cambia entre modelos GGUF desde la propia terminal.
 - **Diagnóstico** — comando `doctor` que comprueba modelo, runtime y hardware.
 
@@ -58,6 +59,7 @@ portable.exe help               # ayuda completa
 | `/modelos` | lista y cambia de modelo |
 | `/descargar` | descarga un modelo nuevo |
 | `/net [on\|off]` | activa o desactiva la búsqueda |
+| `/harness <objetivo>` | modo agéntico por pasos (plan → herramientas → verificar → `[[DONE]]`) |
 | `/temp`, `/rp`, `/topp` | ajusta muestreo |
 | `/tokens [n]` | tokens máximos por respuesta |
 | `/exit` | sale de la sesión |
@@ -81,7 +83,7 @@ El agente dispone de tres herramientas sobre tu equipo. Puede decidir usarlas po
 | --- | --- | --- |
 | `[[READ]] ruta` | Lee un archivo (máx. 4000 chars) o lista una carpeta | No, salvo fuera del área de trabajo |
 | `[[CMD]] comando` | Ejecuta PowerShell (cwd del proyecto, timeout 30 s) | Siempre (s/n) |
-| `[[WRITE]] ruta :: contenido` | Crea o reemplaza un archivo (con vista previa) | Siempre (s/n) |
+| `[[WRITE]] ruta :: contenido [[END]]` | Crea o reemplaza un archivo (con vista previa) | Siempre (s/n) |
 
 Seguridad:
 
@@ -89,6 +91,8 @@ Seguridad:
 - Las rutas se resuelven contra el área de trabajo; lecturas fuera de ella requieren permiso explícito.
 - Los marcadores nunca se muestran en pantalla (buffer anti-fugas del streaming).
 - Si deniegas una acción, el agente lo informa claramente en lugar de inventar el resultado.
+- **Anti-alucinación de acciones** — si el modelo afirma "he creado el archivo X" o "ejecuté el comando Y" sin haber emitido el marcador, la terminal lo detecta, descarta la respuesta falsa y fuerza un reintento con el formato correcto (máx. 2). `[[WRITE]]` sin su cierre `[[END]]` se considera incompleto y **no crea nada**.
+- El agente recuerda la última ruta usada por las herramientas en la sesión: pedidos como *"en esa carpeta"* o *"con el título mejoras"* se resuelven contra ella.
 
 ## Configuración
 
@@ -129,6 +133,23 @@ TerminalApplication.cs      lógica de terminal, comandos, búsqueda web y herra
 ModelRegistry.cs            catálogo de modelos descargables
 Capturas/                   capturas de pantalla
 ```
+
+## Ejecutar desde un pendrive (portable)
+
+El ejecutable es **self-contained**: no necesita .NET instalado ni Python. Para usarlo desde un USB:
+
+```
+<stick>\IA 27 T\ia_terminal\publish\portable.exe   ← terminal
+<stick>\IA 27 T\ia_terminal\publish\runtime\       ← llama-server.exe + DLLs
+<stick>\IA 27 T\ia_terminal\publish\config.json    ← configuración (viaja con el USB)
+<stick>\Modelo\Atenea-Omega-IB2.gguf                ← modelos (o en publish\models\)
+```
+
+- La **configuración se guarda junto al ejecutable**, así que el pendrive es autocontenido; si la carpeta no es escribible, cae a `%APPDATA%\IA27Terminal\config.json`.
+- Los **modelos se localizan solos**: primero `publish\models\`, luego la ruta configurada, luego una carpeta `Modelo`/`models` hasta 3 niveles arriba del portable. Funciona con cualquier letra de unidad.
+- Configurar con el propio ejecutable: `portable.exe config set model-dir "D:\Modelo"` y `portable.exe config set model Atenea-Omega-IB2.gguf`.
+- **Importante**: si la salida del modelo es basura (caracteres sin sentido), el archivo `.gguf` está **corrupto** — una copia dañada con el mismo tamaño rompe la generación sin dar error. Verificalo con `Get-FileHash` contra el original o probando `runtime\llama-cli.exe -m <modelo> -p "hola" -n 32`.
+- Antes de republicar sobre el pendrive, cerrá la terminal: el `.exe` en uso bloquea el `dotnet publish`.
 
 ## Problemas conocidos
 
